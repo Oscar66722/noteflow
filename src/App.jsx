@@ -8,14 +8,41 @@ import './App.css'
 
 function App() {
   const storageKey = 'saved-study-notes'
+  const preferencesKey = 'noteflow-preferences'
+  const defaultPreferences = {
+    subjectMode: 'General',
+    summaryLength: 'Balanced',
+    language: 'English',
+  }
+  const subjectModes = [
+    'General',
+    'Science & Maths',
+    'History & Humanities',
+    'Law',
+    'Literature',
+    'Computer Science',
+    'Economics & Business',
+  ]
+  const summaryLengths = ['Brief', 'Balanced', 'Detailed']
+  const languages = ['English', 'Spanish', 'French', 'German', 'Dutch', 'Italian', 'Portuguese']
+
   const [notes, setNotes] = useState('')
   const [summary, setSummary] = useState('')
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [preferencesOpen, setPreferencesOpen] = useState(false)
   const recognitionRef = useRef(null)
   const richSummaryRef = useRef(null)
+  const [preferences, setPreferences] = useState(() => {
+    try {
+      const raw = localStorage.getItem(preferencesKey)
+      return raw ? { ...defaultPreferences, ...JSON.parse(raw) } : defaultPreferences
+    } catch (error) {
+      return defaultPreferences
+    }
+  })
   const [savedNotes, setSavedNotes] = useState(() => {
     try {
       const raw = localStorage.getItem(storageKey)
@@ -32,6 +59,21 @@ function App() {
       setLoading(true)
       setSummary('')
 
+      const subjectInstructions = {
+        General: 'Use whatever structure best fits the content.',
+        'Science & Maths': 'Highlight formulas, constants, derivations, and step-by-step reasoning.',
+        'History & Humanities': 'Highlight dates, key figures, causes, and consequences.',
+        Law: 'Highlight cases, statutes, legal tests, and precedents.',
+        Literature: 'Highlight themes, characters, quotes, and literary techniques.',
+        'Computer Science': 'Highlight algorithms, complexity, and code concepts.',
+        'Economics & Business': 'Highlight models, graphs, key theorems, and real-world examples.',
+      }
+      const lengthInstructions = {
+        Brief: 'Bullet points only, no elaboration, very concise.',
+        Balanced: 'Current default behaviour with concise but useful detail.',
+        Detailed: 'Include explanations, examples, and context for each point.',
+      }
+
       console.log('sending key:', import.meta.env.VITE_ANTHROPIC_KEY)
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
@@ -44,6 +86,7 @@ function App() {
         body: JSON.stringify({
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 1024,
+          stream: true,
           system: `You are a study assistant. The student will give you their raw lecture notes.
 Transform them into a clean study guide they can revise from.
 
@@ -54,6 +97,18 @@ Rules:
 - Include formulas, distinctions, and examples where relevant
 - If the notes mention something without explaining it, flag it at the end
 - Never use the same template twice — let the content dictate the structure
+- Silently correct any spelling mistakes or typos in the notes — never mention them, just use the correct version
+- If the same concept, fact, or idea appears multiple times in the notes, consolidate it into one place — never repeat the same point twice
+- If the notes are messy or hard to follow, infer what the student meant based on context
+- Never say things like "the notes mention..." or "you wrote..." — just present the content cleanly as fact
+
+Preferences:
+- Subject mode: ${preferences.subjectMode}
+- Subject mode instruction: ${subjectInstructions[preferences.subjectMode]}
+- Summary length: ${preferences.summaryLength}
+- Summary length instruction: ${lengthInstructions[preferences.summaryLength]}
+- Language: ${preferences.language}
+- Write the entire summary in ${preferences.language}
 
 Output clean markdown only.`,
           messages: [{ role: 'user', content: notes }]
@@ -65,11 +120,55 @@ Output clean markdown only.`,
         throw new Error(errorBody || 'Failed to summarize notes.')
       }
 
-      const data = await response.json()
-      const text =
-        data?.content?.find((block) => block.type === 'text')?.text ||
-        'No summary returned by the API.'
-      setSummary(text)
+      if (!response.body) {
+        throw new Error('No stream returned by the API.')
+      }
+
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let done = false
+      let buffer = ''
+      let receivedFirstChunk = false
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read()
+        done = readerDone
+        buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
+
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() || ''
+
+        for (const part of parts) {
+          if (!part.includes('data: ')) continue
+          const dataChunks = part.split('data: ').slice(1)
+
+          for (const dataChunk of dataChunks) {
+            const payload = dataChunk.trim()
+            if (!payload || payload === '[DONE]') continue
+
+            const parsed = JSON.parse(payload)
+            if (parsed.type === 'message_stop') {
+              done = true
+              break
+            }
+
+            const deltaText = parsed?.delta?.text
+            if (deltaText) {
+              if (!receivedFirstChunk) {
+                setLoading(false)
+                receivedFirstChunk = true
+              }
+              setSummary((prev) => prev + deltaText)
+            }
+          }
+
+          if (done) break
+        }
+      }
+
+      if (!receivedFirstChunk && !summary) {
+        setSummary('No summary returned by the API.')
+      }
     } catch (error) {
       setSummary(`Unable to generate summary. ${error.message}`)
     } finally {
@@ -79,7 +178,26 @@ Output clean markdown only.`,
 
   const handleCopySummary = async () => {
     if (!summary || !richSummaryRef.current) return
-    const html = richSummaryRef.current.innerHTML
+    const getStyledSummaryHtml = () => {
+      const clone = richSummaryRef.current.cloneNode(true)
+      clone.querySelectorAll('table').forEach((table) => {
+        table.style.borderCollapse = 'collapse'
+        table.style.width = '100%'
+      })
+      clone.querySelectorAll('th').forEach((th) => {
+        th.style.border = '1px solid black'
+        th.style.padding = '6px 12px'
+        th.style.backgroundColor = '#f3f4f6'
+        th.style.textAlign = 'left'
+      })
+      clone.querySelectorAll('td').forEach((td) => {
+        td.style.border = '1px solid black'
+        td.style.padding = '6px 12px'
+      })
+      return clone.innerHTML
+    }
+
+    const html = getStyledSummaryHtml()
     const plainText = richSummaryRef.current.innerText
 
     try {
@@ -237,6 +355,10 @@ Output clean markdown only.`,
     }
   }, [])
 
+  useEffect(() => {
+    localStorage.setItem(preferencesKey, JSON.stringify(preferences))
+  }, [preferences])
+
   return (
     <main
       style={{
@@ -259,9 +381,14 @@ Output clean markdown only.`,
         }}
       >
         <div style={{ fontSize: '24px', fontWeight: 800, letterSpacing: '-0.02em', color: '#ffffff' }}>NoteFlow</div>
-        <button type="button" onClick={() => setSidebarOpen((open) => !open)} className="btn btn-notes">
-          Notes
-        </button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button type="button" onClick={() => setSidebarOpen((open) => !open)} className="btn btn-notes">
+            Notes
+          </button>
+          <button type="button" onClick={() => setPreferencesOpen(true)} className="btn btn-notes">
+            Preferences
+          </button>
+        </div>
       </div>
       <aside
         style={{
@@ -475,6 +602,100 @@ Output clean markdown only.`,
           ) : null}
         </div>
       </section>
+      {preferencesOpen ? (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(2, 6, 23, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 40,
+            padding: '16px',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '620px',
+              backgroundColor: '#1e293b',
+              borderRadius: '14px',
+              boxShadow: '0 20px 45px rgba(2, 6, 23, 0.45)',
+              padding: '22px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, color: '#e2e8f0' }}>Preferences</h3>
+              <button type="button" className="btn btn-notes btn-small" onClick={() => setPreferencesOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <p style={{ margin: '0 0 8px', color: '#94a3b8', fontSize: '13px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Subject Mode
+              </p>
+              <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: '1fr 1fr' }}>
+                {subjectModes.map((mode) => (
+                  <label key={mode} style={{ color: '#e2e8f0', fontSize: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      type="radio"
+                      name="subject-mode"
+                      checked={preferences.subjectMode === mode}
+                      onChange={() => setPreferences((prev) => ({ ...prev, subjectMode: mode }))}
+                    />
+                    {mode}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '20px' }}>
+              <p style={{ margin: '0 0 8px', color: '#94a3b8', fontSize: '13px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Summary Length
+              </p>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {summaryLengths.map((length) => (
+                  <button
+                    key={length}
+                    type="button"
+                    className={preferences.summaryLength === length ? 'btn btn-primary btn-small' : 'btn btn-notes btn-small'}
+                    onClick={() => setPreferences((prev) => ({ ...prev, summaryLength: length }))}
+                  >
+                    {length}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <p style={{ margin: '0 0 8px', color: '#94a3b8', fontSize: '13px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Language
+              </p>
+              <select
+                value={preferences.language}
+                onChange={(e) => setPreferences((prev) => ({ ...prev, language: e.target.value }))}
+                style={{
+                  width: '100%',
+                  borderRadius: '8px',
+                  backgroundColor: '#0f172a',
+                  color: '#e2e8f0',
+                  border: '1px solid #334155',
+                  padding: '10px 12px',
+                  fontSize: '14px',
+                }}
+              >
+                {languages.map((language) => (
+                  <option key={language} value={language}>
+                    {language}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div
         ref={richSummaryRef}
         style={{
