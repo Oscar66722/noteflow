@@ -457,3 +457,118 @@
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+@media (max-width: 1200px) {
+  .app-shell {
+    padding: 0 20px 24px;
+  }
+
+  .topbar {
+    margin: 0 -20px 20px;
+    padding: 12px 20px;
+  }
+
+  .panel {
+    padding: 26px;
+  }
+
+  .notes-input {
+    min-height: 430px;
+  }
+
+  .summary-surface {
+    min-height: 470px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .workspace-card {
+    grid-template-columns: 1fr;
+  }
+
+  .summary-panel {
+    border-left: none;
+    border-top: 1px solid #e8e4de;
+  }
+
+  .topbar-inner {
+    gap: 10px;
+  }
+
+  .logo {
+    font-size: 20px;
+  }
+
+  .saved-sidebar {
+    width: min(360px, 88vw);
+  }
+}
+
+@media (max-width: 768px) {
+  .app-shell {
+    padding: 0 14px 18px;
+  }
+
+  .topbar {
+    margin: 0 -14px 16px;
+    padding: 10px 14px;
+  }
+
+  .topbar-inner {
+    flex-wrap: wrap;
+    align-items: center;
+  }
+
+  .topbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .panel {
+    padding: 18px;
+  }
+
+  .section-label {
+    margin-bottom: 10px;
+  }
+
+  .notes-input {
+    min-height: 320px;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  .panel-actions {
+    gap: 8px;
+  }
+
+  .btn {
+    padding: 8px 14px;
+  }
+
+  .summary-surface {
+    min-height: 330px;
+  }
+
+  .summary-toolbar {
+    position: static;
+    margin-bottom: 10px;
+  }
+
+  .markdown-content {
+    padding-top: 0;
+  }
+
+  .preferences-modal {
+    border-radius: 14px;
+    padding: 16px;
+  }
+
+  .modal-header h3 {
+    font-size: 24px;
+  }
+
+  .saved-note-card .delete-note-btn {
+    opacity: 1;
+  }
+}
