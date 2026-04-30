@@ -477,118 +477,43 @@ Output clean markdown only.`,
   }, [preferences])
 
   return (
-    <main
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#0f172a',
-        fontFamily: 'Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
-        color: '#e2e8f0',
-        padding: '36px',
-        boxSizing: 'border-box',
-        position: 'relative',
-      }}
-    >
-      <div
-        style={{
-          maxWidth: '1240px',
-          margin: '0 auto 20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-        }}
-      >
-        <div style={{ fontSize: '24px', fontWeight: 800, letterSpacing: '-0.02em', color: '#ffffff' }}>NoteFlow</div>
-        <div style={{ display: 'flex', gap: '10px' }}>
-          <button type="button" onClick={() => setSidebarOpen((open) => !open)} className="btn btn-notes">
-            Notes
-          </button>
-          <button type="button" onClick={() => setPreferencesOpen(true)} className="btn btn-notes">
-            Preferences
-          </button>
+    <main className="app-shell">
+      <header className="topbar">
+        <div className="topbar-inner">
+          <h1 className="logo">NoteFlow</h1>
+          <div className="topbar-actions">
+            <button type="button" onClick={() => setPreferencesOpen(true)} className="btn btn-ghost">
+              Preferences
+            </button>
+            <button type="button" onClick={() => setSidebarOpen((open) => !open)} className="btn btn-ghost">
+              Notes
+            </button>
+          </div>
         </div>
-      </div>
-      <aside
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          width: '360px',
-          height: '100vh',
-          backgroundColor: '#1e293b',
-          boxShadow: '6px 0 26px rgba(2, 6, 23, 0.35)',
-          transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
-          transition: 'transform 0.25s ease',
-          zIndex: 30,
-          padding: '20px',
-          boxSizing: 'border-box',
-          overflowY: 'auto',
-        }}
-      >
-        <h3 style={{ marginTop: 0, marginBottom: '14px', fontSize: '20px', color: '#e2e8f0' }}>Saved Notes</h3>
+      </header>
+
+      <aside className={`saved-sidebar ${sidebarOpen ? 'is-open' : ''}`}>
+        <h3 className="sidebar-title">Saved Notes</h3>
         {savedNotes.length === 0 ? (
-          <p style={{ margin: 0, color: '#94a3b8' }}>No saved notes yet.</p>
+          <p className="muted-copy">No saved notes yet.</p>
         ) : (
           savedNotes.map((note) => (
-            <div
-              key={note.id}
-              style={{
-                borderRadius: '12px',
-                padding: '12px',
-                marginBottom: '12px',
-                backgroundColor: '#0f172a',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => handleLoadSavedNote(note)}
-                style={{
-                  border: 'none',
-                  background: 'none',
-                  padding: 0,
-                  margin: 0,
-                  textAlign: 'left',
-                  cursor: 'pointer',
-                  width: '100%',
-                  color: '#e2e8f0',
-                }}
-              >
-                <div style={{ fontWeight: 600, marginBottom: '6px' }}>{note.title || 'Untitled note'}</div>
-                <div style={{ fontSize: '12px', color: '#6b7280' }}>
-                  {new Date(note.timestamp).toLocaleString()}
-                </div>
+            <div key={note.id} className="saved-note-card">
+              <button type="button" onClick={() => handleLoadSavedNote(note)} className="saved-note-main">
+                <div className="saved-note-title">{note.title || 'Untitled note'}</div>
+                <div className="saved-note-date">{new Date(note.timestamp).toLocaleString()}</div>
               </button>
-              <button type="button" onClick={() => handleDeleteSavedNote(note.id)} className="btn btn-notes btn-small">
+              <button type="button" onClick={() => handleDeleteSavedNote(note.id)} className="delete-note-btn">
                 Delete
               </button>
             </div>
           ))
         )}
       </aside>
-      <section
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '1fr 1fr',
-          borderRadius: '18px',
-          overflow: 'hidden',
-          maxWidth: '1240px',
-          margin: '0 auto',
-          backgroundColor: '#1e293b',
-          boxShadow: '0 20px 45px rgba(2, 6, 23, 0.38)',
-        }}
-      >
-        <div style={{ padding: '28px' }}>
-          <label
-            htmlFor="notes"
-            style={{
-              display: 'block',
-              fontSize: '13px',
-              fontWeight: 700,
-              marginBottom: '14px',
-              color: '#94a3b8',
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-            }}
-          >
+
+      <section className="workspace-card">
+        <div className="panel notes-panel">
+          <label htmlFor="notes" className="section-label">
             Your Notes
           </label>
           <textarea
@@ -597,33 +522,15 @@ Output clean markdown only.`,
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
             placeholder="Type or paste your class notes here..."
-            style={{
-              width: '100%',
-              minHeight: '480px',
-              resize: 'vertical',
-              border: 'none',
-              borderRadius: '12px',
-              padding: '14px',
-              fontSize: '16px',
-              lineHeight: 1.6,
-              boxSizing: 'border-box',
-              backgroundColor: '#1e293b',
-              color: '#ffffff',
-            }}
           />
-          <div style={{ marginTop: '16px', display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              disabled={loading}
-              onClick={handleSummarize}
-              className="btn btn-primary"
-            >
-              Summarize →
+          <div className="panel-actions">
+            <button type="button" disabled={loading} onClick={handleSummarize} className="btn btn-summarize">
+              Summarize
             </button>
             <button
               type="button"
               onClick={handleToggleRecording}
-              className={`btn ${isRecording ? 'btn-mic-active' : 'btn-mic-idle'}`}
+              className={`btn btn-mic ${isRecording ? 'is-recording' : ''}`}
             >
               {isRecording ? 'Stop Mic' : 'Mic'}
             </button>
@@ -631,47 +538,27 @@ Output clean markdown only.`,
           </div>
         </div>
 
-        <div style={{ borderLeft: '1px solid #334155', padding: '28px' }}>
-          <h2
-            style={{
-              margin: 0,
-              fontSize: '13px',
-              fontWeight: 700,
-              color: '#94a3b8',
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-            }}
-          >
-            Structured Summary
-          </h2>
-          <div
-            style={{
-              marginTop: '14px',
-              minHeight: '520px',
-              border: 'none',
-              borderRadius: '12px',
-              padding: '14px',
-              backgroundColor: '#1e293b',
-              lineHeight: 1.6,
-              fontSize: '16px',
-              color: '#e2e8f0',
-              position: 'relative',
-            }}
-          >
+        <div className="panel summary-panel">
+          <h2 className="section-label">Structured Summary</h2>
+          <div className={`summary-surface ${summary ? 'has-content' : ''}`}>
             {summary ? (
-              <div style={{ position: 'absolute', top: '12px', right: '12px', display: 'flex', gap: '8px' }}>
-                <button type="button" onClick={handleCopySummary} className="btn btn-notes btn-small">
-                  {copied ? 'Copied ✓' : '⎘ Copy'}
+              <div className="summary-toolbar">
+                <button type="button" onClick={handleCopySummary} className={`btn btn-subtle btn-small ${copied ? 'is-copied' : ''}`}>
+                  {copied ? 'Copied ✓' : 'Copy'}
                 </button>
-                <button type="button" onClick={handleDownloadPdf} className="btn btn-notes btn-small">
-                  ⭳ PDF
+                <button type="button" onClick={handleDownloadPdf} className="btn btn-subtle btn-small">
+                  PDF
                 </button>
               </div>
             ) : null}
+
             {loading ? (
-              <div className="loading-state">
-                <span className="loading-dots" aria-hidden="true"></span>
-                <span>Generating summary...</span>
+              <div className="shimmer-wrap">
+                <div className="shimmer-line"></div>
+                <div className="shimmer-line short"></div>
+                <div className="shimmer-line"></div>
+                <div className="shimmer-line medium"></div>
+                <div className="shimmer-line"></div>
               </div>
             ) : summary ? (
               <ReactMarkdown
@@ -704,80 +591,51 @@ Output clean markdown only.`,
                 {summary}
               </ReactMarkdown>
             ) : (
-              'Your generated summary will appear here.'
+              <p className="muted-copy">Your generated summary will appear here.</p>
             )}
           </div>
           {summary ? (
-            <button
-              type="button"
-              onClick={handleSaveNote}
-              className="btn btn-notes"
-              style={{ marginTop: '14px' }}
-            >
+            <button type="button" onClick={handleSaveNote} className="btn btn-subtle save-note-btn">
               Save Note
             </button>
           ) : null}
         </div>
       </section>
+
       {preferencesOpen ? (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            backgroundColor: 'rgba(2, 6, 23, 0.6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 40,
-            padding: '16px',
-          }}
-        >
-          <div
-            style={{
-              width: '100%',
-              maxWidth: '620px',
-              backgroundColor: '#1e293b',
-              borderRadius: '14px',
-              boxShadow: '0 20px 45px rgba(2, 6, 23, 0.45)',
-              padding: '22px',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-              <h3 style={{ margin: 0, color: '#e2e8f0' }}>Preferences</h3>
-              <button type="button" className="btn btn-notes btn-small" onClick={() => setPreferencesOpen(false)}>
+        <div className="modal-backdrop">
+          <div className="preferences-modal">
+            <div className="modal-header">
+              <h3>Preferences</h3>
+              <button type="button" className="btn btn-subtle btn-small" onClick={() => setPreferencesOpen(false)}>
                 Close
               </button>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <p style={{ margin: '0 0 8px', color: '#94a3b8', fontSize: '13px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Subject Mode
-              </p>
-              <div style={{ display: 'grid', gap: '8px', gridTemplateColumns: '1fr 1fr' }}>
+            <div className="pref-section">
+              <p className="section-label">Subject Mode</p>
+              <div className="pill-group">
                 {subjectModes.map((mode) => (
-                  <label key={mode} style={{ color: '#e2e8f0', fontSize: '14px', display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <input
-                      type="radio"
-                      name="subject-mode"
-                      checked={preferences.subjectMode === mode}
-                      onChange={() => setPreferences((prev) => ({ ...prev, subjectMode: mode }))}
-                    />
+                  <button
+                    key={mode}
+                    type="button"
+                    className={`btn btn-pill ${preferences.subjectMode === mode ? 'is-active' : ''}`}
+                    onClick={() => setPreferences((prev) => ({ ...prev, subjectMode: mode }))}
+                  >
                     {mode}
-                  </label>
+                  </button>
                 ))}
               </div>
             </div>
 
-            <div style={{ marginBottom: '20px' }}>
-              <p style={{ margin: '0 0 8px', color: '#94a3b8', fontSize: '13px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Summary Length
-              </p>
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <div className="pref-section">
+              <p className="section-label">Summary Length</p>
+              <div className="pill-group">
                 {summaryLengths.map((length) => (
                   <button
                     key={length}
                     type="button"
-                    className={preferences.summaryLength === length ? 'btn btn-primary btn-small' : 'btn btn-notes btn-small'}
+                    className={`btn btn-pill ${preferences.summaryLength === length ? 'is-active' : ''}`}
                     onClick={() => setPreferences((prev) => ({ ...prev, summaryLength: length }))}
                   >
                     {length}
@@ -786,22 +644,12 @@ Output clean markdown only.`,
               </div>
             </div>
 
-            <div>
-              <p style={{ margin: '0 0 8px', color: '#94a3b8', fontSize: '13px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Language
-              </p>
+            <div className="pref-section">
+              <p className="section-label">Language</p>
               <select
                 value={preferences.language}
                 onChange={(e) => setPreferences((prev) => ({ ...prev, language: e.target.value }))}
-                style={{
-                  width: '100%',
-                  borderRadius: '8px',
-                  backgroundColor: '#0f172a',
-                  color: '#e2e8f0',
-                  border: '1px solid #334155',
-                  padding: '10px 12px',
-                  fontSize: '14px',
-                }}
+                className="language-select"
               >
                 {languages.map((language) => (
                   <option key={language} value={language}>
@@ -810,13 +658,12 @@ Output clean markdown only.`,
                 ))}
               </select>
             </div>
-            <div style={{ marginTop: '20px' }}>
-              <p style={{ margin: '0 0 8px', color: '#94a3b8', fontSize: '13px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                Style Examples
-              </p>
+
+            <div className="pref-section">
+              <p className="section-label">Style Examples</p>
               <button
                 type="button"
-                className="btn btn-notes btn-small"
+                className="btn btn-subtle btn-small"
                 onClick={() => examplesInputRef.current?.click()}
                 disabled={preferences.styleExamples.length >= 3}
               >
@@ -830,35 +677,11 @@ Output clean markdown only.`,
                 style={{ display: 'none' }}
                 onChange={handleUploadExamples}
               />
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
+              <div className="example-pills">
                 {preferences.styleExamples.map((example) => (
-                  <span
-                    key={example.id}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      padding: '6px 10px',
-                      borderRadius: '999px',
-                      border: '1px solid #334155',
-                      color: '#e2e8f0',
-                      fontSize: '12px',
-                    }}
-                  >
+                  <span key={example.id} className="example-pill">
                     {example.name}
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveExample(example.id)}
-                      style={{
-                        border: 'none',
-                        background: 'transparent',
-                        color: '#e2e8f0',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        lineHeight: 1,
-                        padding: 0,
-                      }}
-                    >
+                    <button type="button" onClick={() => handleRemoveExample(example.id)} className="pill-remove">
                       X
                     </button>
                   </span>
@@ -868,6 +691,7 @@ Output clean markdown only.`,
           </div>
         </div>
       ) : null}
+
       <div
         ref={richSummaryRef}
         style={{
