@@ -15,6 +15,7 @@ function App() {
   const [isRecording, setIsRecording] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const recognitionRef = useRef(null)
+  const richSummaryRef = useRef(null)
   const [savedNotes, setSavedNotes] = useState(() => {
     try {
       const raw = localStorage.getItem(storageKey)
@@ -77,14 +78,73 @@ Output clean markdown only.`,
   }
 
   const handleCopySummary = async () => {
-    if (!summary) return
+    if (!summary || !richSummaryRef.current) return
+    const html = richSummaryRef.current.innerHTML
+    const plainText = richSummaryRef.current.innerText
+
     try {
-      await navigator.clipboard.writeText(summary)
+      if (window.ClipboardItem && navigator.clipboard?.write) {
+        const item = new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([plainText], { type: 'text/plain' }),
+        })
+        await navigator.clipboard.write([item])
+      } else {
+        const tempDiv = document.createElement('div')
+        tempDiv.contentEditable = 'true'
+        tempDiv.style.position = 'fixed'
+        tempDiv.style.left = '-9999px'
+        tempDiv.innerHTML = html
+        document.body.appendChild(tempDiv)
+        const range = document.createRange()
+        range.selectNodeContents(tempDiv)
+        const selection = window.getSelection()
+        selection.removeAllRanges()
+        selection.addRange(range)
+        document.execCommand('copy')
+        selection.removeAllRanges()
+        document.body.removeChild(tempDiv)
+      }
       setCopied(true)
       setTimeout(() => setCopied(false), 2000)
     } catch (error) {
       setCopied(false)
     }
+  }
+
+  const handleDownloadPdf = () => {
+    if (!summary || !richSummaryRef.current) return
+    const summaryHtml = richSummaryRef.current.innerHTML
+    const printWindow = window.open('', '_blank', 'width=900,height=1000')
+    if (!printWindow) return
+
+    printWindow.document.write(`
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>NoteFlow Summary</title>
+          <style>
+            body {
+              margin: 0;
+              padding: 40px;
+              background: #ffffff;
+              color: #000000;
+              font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+              line-height: 1.6;
+            }
+            h1, h2, h3 { margin: 0.8em 0 0.4em; }
+            ul, ol { padding-left: 1.2rem; }
+            table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
+          </style>
+        </head>
+        <body>${summaryHtml}</body>
+      </html>
+    `)
+    printWindow.document.close()
+    printWindow.focus()
+    printWindow.print()
   }
 
   const persistSavedNotes = (updatedNotes) => {
@@ -355,14 +415,14 @@ Output clean markdown only.`,
             }}
           >
             {summary ? (
-              <button
-                type="button"
-                onClick={handleCopySummary}
-                className="btn btn-notes btn-small"
-                style={{ position: 'absolute', top: '12px', right: '12px' }}
-              >
-                {copied ? 'Copied ✓' : '⎘ Copy'}
-              </button>
+              <div style={{ position: 'absolute', top: '12px', right: '12px', display: 'flex', gap: '8px' }}>
+                <button type="button" onClick={handleCopySummary} className="btn btn-notes btn-small">
+                  {copied ? 'Copied ✓' : '⎘ Copy'}
+                </button>
+                <button type="button" onClick={handleDownloadPdf} className="btn btn-notes btn-small">
+                  ⭳ PDF
+                </button>
+              </div>
             ) : null}
             {loading ? (
               <div className="loading-state">
@@ -415,6 +475,23 @@ Output clean markdown only.`,
           ) : null}
         </div>
       </section>
+      <div
+        ref={richSummaryRef}
+        style={{
+          position: 'fixed',
+          left: '-9999px',
+          top: '0',
+          width: '800px',
+          backgroundColor: '#ffffff',
+          color: '#000000',
+          padding: '32px',
+        }}
+        aria-hidden="true"
+      >
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>
+          {summary}
+        </ReactMarkdown>
+      </div>
     </main>
   )
 }
