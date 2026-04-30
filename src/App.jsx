@@ -13,6 +13,7 @@ function App() {
     subjectMode: 'General',
     summaryLength: 'Balanced',
     language: 'English',
+    styleExamples: [],
   }
   const subjectModes = [
     'General',
@@ -35,6 +36,7 @@ function App() {
   const [preferencesOpen, setPreferencesOpen] = useState(false)
   const recognitionRef = useRef(null)
   const richSummaryRef = useRef(null)
+  const examplesInputRef = useRef(null)
   const [preferences, setPreferences] = useState(() => {
     try {
       const raw = localStorage.getItem(preferencesKey)
@@ -73,6 +75,22 @@ function App() {
         Balanced: 'Current default behaviour with concise but useful detail.',
         Detailed: 'Include explanations, examples, and context for each point.',
       }
+      const styleExamplesSection =
+        preferences.styleExamples.length > 0
+          ? `
+The student has provided examples of summaries they like.
+Study the structure, tone, formatting choices, and level of detail
+in these examples and match that style closely in your output.
+
+Examples:
+---
+${preferences.styleExamples.map((example) => example.text).join('\n---\n')}
+---
+
+Use these as your style guide. The content will be different
+but the style, structure and tone should closely match.
+`
+          : ''
 
       console.log('sending key:', import.meta.env.VITE_ANTHROPIC_KEY)
       const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -109,6 +127,7 @@ Preferences:
 - Summary length instruction: ${lengthInstructions[preferences.summaryLength]}
 - Language: ${preferences.language}
 - Write the entire summary in ${preferences.language}
+${styleExamplesSection}
 
 Output clean markdown only.`,
           messages: [{ role: 'user', content: notes }]
@@ -296,6 +315,104 @@ Output clean markdown only.`,
   const handleDeleteSavedNote = (id) => {
     const updated = savedNotes.filter((note) => note.id !== id)
     persistSavedNotes(updated)
+  }
+
+  const loadPdfJs = () =>
+    new Promise((resolve, reject) => {
+      if (window.pdfjsLib) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.js'
+        resolve(window.pdfjsLib)
+        return
+      }
+
+      const existing = document.querySelector('script[data-pdfjs="true"]')
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.pdfjsLib))
+        existing.addEventListener('error', () => reject(new Error('Failed to load PDF.js')))
+        return
+      }
+
+      const script = document.createElement('script')
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.js'
+      script.async = true
+      script.dataset.pdfjs = 'true'
+      script.onload = () => {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+          'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.js'
+        resolve(window.pdfjsLib)
+      }
+      script.onerror = () => reject(new Error('Failed to load PDF.js'))
+      document.body.appendChild(script)
+    })
+
+  const readTextFile = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result || ''))
+      reader.onerror = () => reject(new Error(`Unable to read ${file.name}`))
+      reader.readAsText(file)
+    })
+
+  const readPdfFile = async (file) => {
+    const pdfjs = await loadPdfJs()
+    const arrayBuffer = await file.arrayBuffer()
+    const pdf = await pdfjs.getDocument({ data: arrayBuffer }).promise
+    const pages = []
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber)
+      const content = await page.getTextContent()
+      const text = content.items.map((item) => item.str).join(' ')
+      pages.push(text)
+    }
+
+    return pages.join('\n\n')
+  }
+
+  const handleUploadExamples = async (event) => {
+    const incomingFiles = Array.from(event.target.files || [])
+    if (incomingFiles.length === 0) return
+
+    const remainingSlots = 3 - preferences.styleExamples.length
+    const files = incomingFiles.slice(0, remainingSlots)
+
+    try {
+      const parsedExamples = []
+      for (const file of files) {
+        const name = file.name || 'Example'
+        const lowerName = name.toLowerCase()
+        let text = ''
+
+        if (lowerName.endsWith('.txt') || lowerName.endsWith('.md')) {
+          text = await readTextFile(file)
+        } else if (lowerName.endsWith('.pdf')) {
+          text = await readPdfFile(file)
+        }
+
+        if (text.trim()) {
+          parsedExamples.push({ id: `${Date.now()}-${name}`, name, text: text.trim() })
+        }
+      }
+
+      if (parsedExamples.length > 0) {
+        setPreferences((prev) => ({
+          ...prev,
+          styleExamples: [...prev.styleExamples, ...parsedExamples].slice(0, 3),
+        }))
+      }
+    } catch (error) {
+      alert(`Could not upload example: ${error.message}`)
+    } finally {
+      event.target.value = ''
+    }
+  }
+
+  const handleRemoveExample = (id) => {
+    setPreferences((prev) => ({
+      ...prev,
+      styleExamples: prev.styleExamples.filter((example) => example.id !== id),
+    }))
   }
 
   const stopRecording = () => {
@@ -692,6 +809,61 @@ Output clean markdown only.`,
                   </option>
                 ))}
               </select>
+            </div>
+            <div style={{ marginTop: '20px' }}>
+              <p style={{ margin: '0 0 8px', color: '#94a3b8', fontSize: '13px', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+                Style Examples
+              </p>
+              <button
+                type="button"
+                className="btn btn-notes btn-small"
+                onClick={() => examplesInputRef.current?.click()}
+                disabled={preferences.styleExamples.length >= 3}
+              >
+                Upload Example Summary
+              </button>
+              <input
+                ref={examplesInputRef}
+                type="file"
+                accept=".txt,.md,.pdf"
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleUploadExamples}
+              />
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
+                {preferences.styleExamples.map((example) => (
+                  <span
+                    key={example.id}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      padding: '6px 10px',
+                      borderRadius: '999px',
+                      border: '1px solid #334155',
+                      color: '#e2e8f0',
+                      fontSize: '12px',
+                    }}
+                  >
+                    {example.name}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveExample(example.id)}
+                      style={{
+                        border: 'none',
+                        background: 'transparent',
+                        color: '#e2e8f0',
+                        cursor: 'pointer',
+                        fontSize: '12px',
+                        lineHeight: 1,
+                        padding: 0,
+                      }}
+                    >
+                      X
+                    </button>
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         </div>
