@@ -1,11 +1,58 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
-import remarkGfm from 'remark-gfm'
+import { useEditor, EditorContent } from '@tiptap/react'
+import StarterKit from '@tiptap/starter-kit'
 import 'katex/dist/katex.min.css'
 import './App.css'
 
+// ── Markdown → HTML (for loading AI output into Tiptap) ──────────────────────
+const inline = (text) =>
+  text
+    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+
+const markdownToHtml = (md) => {
+  if (!md.trim()) return '<p></p>'
+  const lines = md.split('\n')
+  let html = ''
+  let inUl = false
+  let inOl = false
+
+  const closeList = () => {
+    if (inUl) { html += '</ul>'; inUl = false }
+    if (inOl) { html += '</ol>'; inOl = false }
+  }
+
+  for (const line of lines) {
+    if (line.startsWith('# '))       { closeList(); html += `<h1>${inline(line.slice(2).trim())}</h1>` }
+    else if (line.startsWith('## ')) { closeList(); html += `<h2>${inline(line.slice(3).trim())}</h2>` }
+    else if (line.startsWith('### ')){ closeList(); html += `<h3>${inline(line.slice(4).trim())}</h3>` }
+    else if (/^[-*+] /.test(line))  { if (inOl) closeList(); if (!inUl) { html += '<ul>'; inUl = true } html += `<li><p>${inline(line.replace(/^[-*+] /, '').trim())}</p></li>` }
+    else if (/^\d+\. /.test(line))  { if (inUl) closeList(); if (!inOl) { html += '<ol>'; inOl = true } html += `<li><p>${inline(line.replace(/^\d+\. /, '').trim())}</p></li>` }
+    else if (line.trim() === '' || line.trim() === '---') { closeList() }
+    else if (line.trim())            { closeList(); html += `<p>${inline(line.trim())}</p>` }
+  }
+  closeList()
+  return html || '<p></p>'
+}
+
+// ── Toolbar button ────────────────────────────────────────────────────────────
+function ToolbarBtn({ onClick, active, title, children, disabled }) {
+  return (
+    <button
+      type="button"
+      title={title}
+      disabled={disabled}
+      onMouseDown={(e) => { e.preventDefault(); onClick() }}
+      className={`toolbar-btn ${active ? 'is-active' : ''}`}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ── Main App ──────────────────────────────────────────────────────────────────
 function App() {
   const storageKey = 'saved-study-notes'
   const preferencesKey = 'noteflow-preferences'
@@ -24,7 +71,8 @@ function App() {
   const languages = ['English', 'Spanish', 'French', 'German', 'Dutch', 'Italian', 'Portuguese']
 
   const [notes, setNotes] = useState('')
-  const [editedSummary, setEditedSummary] = useState('')
+  const [streamBuffer, setStreamBuffer] = useState('')   // raw markdown while streaming
+  const [streaming, setStreaming] = useState(false)      // true while AI is generating
   const [noteTitle, setNoteTitle] = useState('')
   const [isDirty, setIsDirty] = useState(false)
   const [saveLabel, setSaveLabel] = useState('Save')
@@ -38,10 +86,8 @@ function App() {
   const [renamingId, setRenamingId] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [uploadedFiles, setUploadedFiles] = useState([])
-  const [editMode, setEditMode] = useState(false)
 
   const recognitionRef = useRef(null)
-  const richSummaryRef = useRef(null)
   const examplesInputRef = useRef(null)
   const fileInputRef = useRef(null)
   const currentNoteIdRef = useRef(null)
@@ -67,16 +113,36 @@ function App() {
   const autoTitle = (text) =>
     text.trim().split(/\s+/).slice(0, 6).join(' ') || 'Untitled Note'
 
-  // ── Auto-save ────────────────────────────────────────────────────────────────
+  // ── Tiptap editor ─────────────────────────────────────────────────────────────
+  const editor = useEditor({
+    extensions: [StarterKit],
+    content: '',
+    editorProps: { attributes: { class: 'tiptap-body' } },
+    onUpdate: () => { setIsDirty(true) },
+  })
+
+  // When streaming finishes, convert markdown → HTML → Tiptap
+  useEffect(() => {
+    if (!streaming && streamBuffer && editor) {
+      const html = markdownToHtml(streamBuffer)
+      editor.commands.setContent(html, false)
+      setIsDirty(true)
+    }
+  }, [streaming])
+
+  const hasSummary = editor && !editor.isEmpty
+
+  // ── Auto-save ─────────────────────────────────────────────────────────────────
   const doAutoSave = useCallback(() => {
-    if (!editedSummary.trim() || !isDirty) return
+    if (!editor || editor.isEmpty || !isDirty) return
+    const html = editor.getHTML()
     const title = noteTitle.trim() || autoTitle(notes)
     const updatedNotes = [...savedNotes]
     if (currentNoteIdRef.current) {
       const idx = updatedNotes.findIndex((n) => n.id === currentNoteIdRef.current)
-      if (idx !== -1) updatedNotes[idx] = { ...updatedNotes[idx], title, notes, summary: editedSummary, timestamp: new Date().toISOString() }
+      if (idx !== -1) updatedNotes[idx] = { ...updatedNotes[idx], title, notes, summary: html, timestamp: new Date().toISOString() }
     } else {
-      const newNote = { id: Date.now().toString(), title, notes, summary: editedSummary, timestamp: new Date().toISOString() }
+      const newNote = { id: Date.now().toString(), title, notes, summary: html, timestamp: new Date().toISOString() }
       currentNoteIdRef.current = newNote.id
       updatedNotes.unshift(newNote)
     }
@@ -85,20 +151,20 @@ function App() {
     setIsDirty(false)
     setAutoSaveLabel('Auto-saved')
     setTimeout(() => setAutoSaveLabel(null), 2000)
-  }, [editedSummary, isDirty, noteTitle, notes, savedNotes])
+  }, [editor, isDirty, noteTitle, notes, savedNotes])
 
   useEffect(() => {
-    if (!isDirty || !editedSummary.trim()) return
+    if (!isDirty || !hasSummary) return
     autoSaveTimerRef.current = setTimeout(doAutoSave, 30000)
     return () => clearTimeout(autoSaveTimerRef.current)
-  }, [isDirty, editedSummary, doAutoSave])
+  }, [isDirty, hasSummary, doAutoSave])
 
-  // ── Keyboard shortcuts ───────────────────────────────────────────────────────
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
-        if (editedSummary.trim()) handleSaveNote()
+        if (hasSummary) handleSaveNote()
       }
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault()
@@ -107,21 +173,21 @@ function App() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [editedSummary, notes, noteTitle, loading])
+  }, [notes, loading, hasSummary, noteTitle])
 
-  // ── New note ─────────────────────────────────────────────────────────────────
+  // ── New note ──────────────────────────────────────────────────────────────────
   const handleNewNote = () => {
-    if (isDirty && editedSummary.trim()) {
+    if (isDirty && hasSummary) {
       if (!window.confirm('You have unsaved changes. Start a new note anyway?')) return
     }
     setNotes('')
-    setEditedSummary('')
+    setStreamBuffer('')
     setNoteTitle('')
     setIsDirty(false)
     setUploadedFiles([])
-    setEditMode(false)
     currentNoteIdRef.current = null
     setSaveLabel('Save')
+    if (editor) editor.commands.clearContent()
   }
 
   // ── PDF.js ────────────────────────────────────────────────────────────────────
@@ -169,7 +235,7 @@ function App() {
     const slideFiles = Object.keys(zip.files)
       .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
       .sort((a, b) => parseInt(a.match(/\d+/)?.[0] || '0') - parseInt(b.match(/\d+/)?.[0] || '0'))
-    if (!slideFiles.length) throw new Error('No slides found in this PowerPoint file.')
+    if (!slideFiles.length) throw new Error('No slides found.')
     const extractText = (xml) =>
       (xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) || []).map((m) => m.replace(/<[^>]+>/g, '').trim()).filter(Boolean).join(' ')
     const slideTexts = []
@@ -200,14 +266,11 @@ function App() {
           setNotes((prev) => prev.trim() ? `${prev}\n\n--- Uploaded: ${file.name} ---\n\n${text.trim()}` : `--- Uploaded: ${file.name} ---\n\n${text.trim()}`)
           setUploadedFiles((prev) => [...prev, file.name])
         } else {
-          alert(`No readable text found in ${file.name}. The file may be image-based.`)
+          alert(`No readable text found in ${file.name}.`)
         }
       }
-    } catch (err) {
-      alert(`Could not read file: ${err.message}`)
-    } finally {
-      setFileLoading(false)
-    }
+    } catch (err) { alert(`Could not read file: ${err.message}`) }
+    finally { setFileLoading(false) }
   }
 
   const handleFileUpload = async (e) => {
@@ -225,34 +288,33 @@ function App() {
     if (files.length) await appendFileToNotes(files)
   }
 
-  // ── Summarize ────────────────────────────────────────────────────────────────
+  // ── Summarize ─────────────────────────────────────────────────────────────────
   const handleSummarize = async () => {
     if (!notes.trim() || loading) return
     try {
       setLoading(true)
-      setEditedSummary('')
+      setStreaming(true)
+      setStreamBuffer('')
       setIsDirty(false)
-      setEditMode(false)
       setNoteTitle(autoTitle(notes))
       currentNoteIdRef.current = null
+      if (editor) editor.commands.clearContent()
 
       const lengthInstructions = {
         Brief: 'Bullet points only, no elaboration, very concise.',
         Balanced: 'Concise but useful detail.',
         Detailed: 'Include explanations, examples, and context for each point.',
       }
-
       const noteTypeInstructions = {
         'Lecture notes': 'Structure as a study guide with key concepts, definitions, and important details.',
-        'Meeting notes': 'Structure with attendees context (if present), decisions made, action items, and key discussion points.',
-        'Research notes': 'Structure with research question, findings, methodology notes, and open questions.',
-        'Book notes': 'Structure with main arguments, key ideas per chapter/section, memorable quotes, and personal takeaways.',
-        'Interview notes': 'Structure with key quotes, themes that emerged, and notable insights from the subject.',
-        'Personal notes': 'Structure naturally based on the content — no rigid format.',
+        'Meeting notes': 'Structure with decisions made, action items, and key discussion points.',
+        'Research notes': 'Structure with findings, methodology notes, and open questions.',
+        'Book notes': 'Structure with main arguments, key ideas, and takeaways.',
+        'Interview notes': 'Structure with key quotes, themes, and notable insights.',
+        'Personal notes': 'Structure naturally based on the content.',
       }
-
       const styleExamplesSection = preferences.styleExamples.length > 0
-        ? `\nThe student has provided examples of summaries they like. Match that style closely.\n\nExamples:\n---\n${preferences.styleExamples.map((e) => e.text).join('\n---\n')}\n---\n`
+        ? `\nMatch the style of these examples closely:\n---\n${preferences.styleExamples.map((e) => e.text).join('\n---\n')}\n---\n`
         : ''
 
       const response = await fetch('https://api.anthropic.com/v1/messages', {
@@ -270,24 +332,23 @@ function App() {
           system: `You are a study assistant. Transform raw notes into a clean, structured summary.
 
 Rules:
-- Read the notes first and decide what structure makes sense for THIS content
-- Be concise — no waffle, no encouragement, no filler phrases
+- Decide what structure fits THIS content — never use the same template twice
+- Be concise — no waffle, encouragement, or filler
 - Include formulas, distinctions, and examples where relevant
-- If the notes mention something without explaining it, flag it at the end
-- Never use the same template twice — let the content dictate the structure
-- Silently correct spelling mistakes and typos
-- Consolidate repeated concepts into one place
-- Infer meaning from messy or unclear notes
-- Never say "the notes mention..." or "you wrote..." — present content as fact
-- If the notes contain text from uploaded files (marked "--- Uploaded: filename ---"), integrate it naturally. For PowerPoint slides marked [Slide N], treat each as a separate topic.
+- Flag anything mentioned but not explained
+- Silently correct spelling and typos
+- Consolidate repeated concepts
+- Never say "the notes mention..." — present content as fact
+- For uploaded files marked "--- Uploaded: filename ---", integrate naturally
+- For PowerPoint slides marked [Slide N], treat each as a separate topic
 
 Preferences:
-- Note type: ${preferences.noteType} — ${noteTypeInstructions[preferences.noteType] || 'structure appropriately'}
-- Subject: ${preferences.subjectMode || 'not specified'} — tailor terminology and structure to this subject if provided
-- Summary length: ${preferences.summaryLength} — ${lengthInstructions[preferences.summaryLength]}
-- Language: ${preferences.language} — write the entire summary in ${preferences.language}
+- Note type: ${preferences.noteType} — ${noteTypeInstructions[preferences.noteType] || ''}
+- Subject: ${preferences.subjectMode || 'not specified'}
+- Length: ${preferences.summaryLength} — ${lengthInstructions[preferences.summaryLength]}
+- Language: ${preferences.language}
 ${styleExamplesSection}
-Output clean markdown only.`,
+Output clean markdown only. Use ## for section headings, **bold** for key terms, and - for bullet points.`,
           messages: [{ role: 'user', content: notes }],
         }),
       })
@@ -316,31 +377,33 @@ Output clean markdown only.`,
             if (dt) {
               if (!receivedFirstChunk) { setLoading(false); receivedFirstChunk = true }
               accumulated += dt
-              setEditedSummary(accumulated)
+              setStreamBuffer(accumulated)
             }
           }
           if (done) break
         }
       }
-      if (!receivedFirstChunk) setEditedSummary('No summary returned.')
-      setIsDirty(true)
+
+      if (!receivedFirstChunk) setStreamBuffer('No summary returned.')
     } catch (error) {
-      setEditedSummary(`Unable to generate summary. ${error.message}`)
+      setStreamBuffer(`Unable to generate summary. ${error.message}`)
     } finally {
       setLoading(false)
+      setStreaming(false) // this triggers the useEffect that loads content into editor
     }
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────────
   const handleSaveNote = () => {
-    if (!editedSummary.trim()) return
+    if (!editor || editor.isEmpty) return
+    const html = editor.getHTML()
     const title = noteTitle.trim() || autoTitle(notes)
     const updatedNotes = [...savedNotes]
     if (currentNoteIdRef.current) {
       const idx = updatedNotes.findIndex((n) => n.id === currentNoteIdRef.current)
-      if (idx !== -1) updatedNotes[idx] = { ...updatedNotes[idx], title, notes, summary: editedSummary, timestamp: new Date().toISOString() }
+      if (idx !== -1) updatedNotes[idx] = { ...updatedNotes[idx], title, notes, summary: html, timestamp: new Date().toISOString() }
     } else {
-      const newNote = { id: Date.now().toString(), title, notes, summary: editedSummary, timestamp: new Date().toISOString() }
+      const newNote = { id: Date.now().toString(), title, notes, summary: html, timestamp: new Date().toISOString() }
       currentNoteIdRef.current = newNote.id
       updatedNotes.unshift(newNote)
     }
@@ -353,13 +416,16 @@ Output clean markdown only.`,
 
   const handleLoadSavedNote = (note) => {
     setNotes(note.notes)
-    setEditedSummary(note.summary)
     setNoteTitle(note.title)
     setIsDirty(false)
-    setEditMode(false)
     currentNoteIdRef.current = note.id
     setSidebarOpen(false)
     setUploadedFiles([])
+    if (editor && note.summary) {
+      // If saved as HTML, load directly. If old markdown format, convert first.
+      const isHtml = note.summary.trim().startsWith('<')
+      editor.commands.setContent(isHtml ? note.summary : markdownToHtml(note.summary), false)
+    }
   }
 
   const handleDeleteSavedNote = (id) => {
@@ -378,18 +444,19 @@ Output clean markdown only.`,
 
   // ── Copy & PDF ────────────────────────────────────────────────────────────────
   const handleCopySummary = async () => {
-    if (!richSummaryRef.current) return
-    const clone = richSummaryRef.current.cloneNode(true)
-    clone.querySelectorAll('table').forEach((t) => { t.style.borderCollapse = 'collapse'; t.style.width = '100%' })
-    clone.querySelectorAll('th').forEach((th) => { th.style.border = '1px solid black'; th.style.padding = '6px 12px'; th.style.backgroundColor = '#f3f4f6'; th.style.textAlign = 'left' })
-    clone.querySelectorAll('td').forEach((td) => { td.style.border = '1px solid black'; td.style.padding = '6px 12px' })
+    if (!editor) return
+    const html = editor.getHTML()
+    const text = editor.getText()
     try {
       if (window.ClipboardItem && navigator.clipboard?.write) {
-        await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([clone.innerHTML], { type: 'text/html' }), 'text/plain': new Blob([richSummaryRef.current.innerText], { type: 'text/plain' }) })])
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([text], { type: 'text/plain' }),
+        })])
       } else {
         const d = document.createElement('div')
         d.contentEditable = 'true'; d.style.cssText = 'position:fixed;left:-9999px'
-        d.innerHTML = clone.innerHTML; document.body.appendChild(d)
+        d.innerHTML = html; document.body.appendChild(d)
         const r = document.createRange(); r.selectNodeContents(d)
         const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
         document.execCommand('copy'); s.removeAllRanges(); document.body.removeChild(d)
@@ -399,10 +466,10 @@ Output clean markdown only.`,
   }
 
   const handleDownloadPdf = () => {
-    if (!richSummaryRef.current) return
+    if (!editor) return
     const w = window.open('', '_blank', 'width=900,height=1000')
     if (!w) return
-    w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>${noteTitle || 'NoteFlow Summary'}</title><style>body{margin:0;padding:40px;background:#fff;color:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.6}h1,h2,h3{margin:.8em 0 .4em}ul,ol{padding-left:1.2rem}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #d1d5db;padding:8px;text-align:left}</style></head><body>${richSummaryRef.current.innerHTML}</body></html>`)
+    w.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>${noteTitle || 'NoteFlow Summary'}</title><style>body{margin:0;padding:40px;background:#fff;color:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.7}h1{font-size:24px;margin:0 0 .6em}h2{font-size:18px;margin:.8em 0 .4em}h3{font-size:15px;margin:.8em 0 .3em}ul,ol{padding-left:1.4rem}li{margin-bottom:4px}p{margin:0 0 .7em}strong{font-weight:700}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #d1d5db;padding:8px;text-align:left}</style></head><body>${editor.getHTML()}</body></html>`)
     w.document.close(); w.focus(); w.print()
   }
 
@@ -443,7 +510,7 @@ Output clean markdown only.`,
         if (text.trim()) parsed.push({ id: `${Date.now()}-${file.name}`, name: file.name, text: text.trim() })
       }
       if (parsed.length) setPreferences((p) => ({ ...p, styleExamples: [...p.styleExamples, ...parsed].slice(0, 3) }))
-    } catch (err) { alert(`Could not upload example: ${err.message}`) }
+    } catch (err) { alert(`Could not upload: ${err.message}`) }
     finally { event.target.value = '' }
   }
 
@@ -495,7 +562,7 @@ Output clean markdown only.`,
 
       <section className="workspace-card">
 
-        {/* LEFT — notes */}
+        {/* LEFT — notes input */}
         <div className="panel notes-panel">
           <div className="panel-label-row">
             <label htmlFor="notes" className="section-label">Notes</label>
@@ -507,10 +574,8 @@ Output clean markdown only.`,
           </div>
 
           <div className="pdf-dropzone" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()}>
-            {fileLoading
-              ? <span className="muted-copy">Reading file...</span>
-              : <span className="muted-copy">Upload <strong>PDF</strong> or <strong>PowerPoint</strong> — drag here or click</span>
-            }
+            {fileLoading ? <span className="muted-copy">Reading file...</span>
+              : <span className="muted-copy">Upload <strong>PDF</strong> or <strong>PowerPoint</strong> — drag here or click</span>}
           </div>
           <input ref={fileInputRef} type="file" accept=".pdf,.pptx,.ppt" multiple style={{ display: 'none' }} onChange={handleFileUpload} />
 
@@ -541,77 +606,70 @@ Output clean markdown only.`,
           </div>
         </div>
 
-        {/* RIGHT — summary */}
+        {/* RIGHT — rich text summary */}
         <div className="panel summary-panel">
-          <div className="summary-header-row">
-            <input
-              className="note-title-input"
-              value={noteTitle}
-              onChange={(e) => { setNoteTitle(e.target.value); setIsDirty(true) }}
-              placeholder="Untitled note"
-            />
-            {editedSummary && (
-              <div className="summary-toolbar">
-                {autoSaveLabel && <span className="autosave-label">{autoSaveLabel}</span>}
-                <button
-                  type="button"
-                  onClick={() => setEditMode((m) => !m)}
-                  className={`btn btn-subtle btn-small ${editMode ? 'is-active-mode' : ''}`}
-                >
-                  {editMode ? 'Done editing' : 'Edit'}
-                </button>
-                <button type="button" onClick={handleCopySummary} className={`btn btn-subtle btn-small ${copied ? 'is-copied' : ''}`}>
-                  {copied ? 'Copied' : 'Copy'}
-                </button>
-                <button type="button" onClick={handleDownloadPdf} className="btn btn-subtle btn-small">Export PDF</button>
-                <button type="button" onClick={handleSaveNote} className={`btn btn-subtle btn-small save-btn ${isDirty ? 'is-dirty' : ''}`}>
-                  {isDirty && <span className="dirty-dot" />}{saveLabel}
-                </button>
-              </div>
-            )}
-          </div>
 
-          <div className={`summary-surface ${editedSummary ? 'has-content' : ''}`}>
+          {/* Title */}
+          <input
+            className="note-title-input"
+            value={noteTitle}
+            onChange={(e) => { setNoteTitle(e.target.value); setIsDirty(true) }}
+            placeholder="Untitled note"
+          />
+
+          {/* Toolbar — only shown when there's content and not loading */}
+          {hasSummary && !loading && (
+            <div className="editor-toolbar">
+              <ToolbarBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} title="Bold (Cmd+B)">B</ToolbarBtn>
+              <ToolbarBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} title="Italic (Cmd+I)"><em>I</em></ToolbarBtn>
+              <div className="toolbar-sep" />
+              <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive('heading', { level: 1 })} title="Heading 1">H1</ToolbarBtn>
+              <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} title="Heading 2">H2</ToolbarBtn>
+              <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} active={editor.isActive('heading', { level: 3 })} title="Heading 3">H3</ToolbarBtn>
+              <div className="toolbar-sep" />
+              <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive('bulletList')} title="Bullet list">List</ToolbarBtn>
+              <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive('orderedList')} title="Numbered list">1. List</ToolbarBtn>
+              <div className="toolbar-sep" />
+              <ToolbarBtn onClick={() => editor.chain().focus().undo().run()} title="Undo">Undo</ToolbarBtn>
+              <ToolbarBtn onClick={() => editor.chain().focus().redo().run()} title="Redo">Redo</ToolbarBtn>
+              <div className="toolbar-spacer" />
+              {autoSaveLabel && <span className="autosave-label">{autoSaveLabel}</span>}
+              <button type="button" onClick={handleCopySummary} className={`btn btn-subtle btn-small ${copied ? 'is-copied' : ''}`}>{copied ? 'Copied' : 'Copy'}</button>
+              <button type="button" onClick={handleDownloadPdf} className="btn btn-subtle btn-small">Export PDF</button>
+              <button type="button" onClick={handleSaveNote} className={`btn btn-subtle btn-small save-btn ${isDirty ? 'is-dirty' : ''}`}>
+                {isDirty && <span className="dirty-dot" />}{saveLabel}
+              </button>
+            </div>
+          )}
+
+          {/* Editor surface */}
+          <div className={`summary-surface ${hasSummary ? 'has-content' : ''}`}>
             {loading ? (
               <div className="shimmer-wrap">
                 <div className="shimmer-line" /><div className="shimmer-line short" />
                 <div className="shimmer-line" /><div className="shimmer-line medium" /><div className="shimmer-line" />
               </div>
-            ) : editedSummary ? (
-              editMode ? (
-                <textarea
-                  className="summary-edit-area"
-                  value={editedSummary}
-                  onChange={(e) => { setEditedSummary(e.target.value); setIsDirty(true) }}
-                  spellCheck={false}
-                  autoFocus
-                />
-              ) : (
-                <ReactMarkdown
-                  className="markdown-content"
-                  remarkPlugins={[remarkGfm, remarkMath]}
-                  rehypePlugins={[rehypeKatex]}
-                  components={{
-                    table: ({ ...props }) => <table style={{ width: '100%', borderCollapse: 'collapse', margin: '12px 0' }} {...props} />,
-                    th: ({ ...props }) => <th style={{ border: '1px solid #d1d5db', padding: '8px', textAlign: 'left', backgroundColor: '#f9fafb' }} {...props} />,
-                    td: ({ ...props }) => <td style={{ border: '1px solid #d1d5db', padding: '8px' }} {...props} />,
-                  }}
-                >{editedSummary}</ReactMarkdown>
-              )
             ) : (
-              <div className="empty-state">
-                <p className="empty-state-title">Your summary will appear here</p>
-                <p className="empty-state-body">
-                  Paste notes or upload a file on the left,<br />
-                  then press <kbd>Summarize</kbd> or <kbd>Cmd Enter</kbd>.
-                </p>
-                <div className="empty-state-hints">
-                  <span>PDF upload</span>
-                  <span>PowerPoint</span>
-                  <span>Voice dictation</span>
-                  <span>7 languages</span>
+              <>
+                <div style={{ display: hasSummary ? 'block' : 'none', height: '100%' }}>
+                  <EditorContent editor={editor} />
                 </div>
-              </div>
+                {!hasSummary && (
+                  <div className="empty-state">
+                    <p className="empty-state-title">Your summary will appear here</p>
+                    <p className="empty-state-body">
+                      Paste notes or upload a file on the left,<br />
+                      then press <kbd>Summarize</kbd> or <kbd>Cmd Enter</kbd>.
+                    </p>
+                    <div className="empty-state-hints">
+                      <span>PDF upload</span>
+                      <span>PowerPoint</span>
+                      <span>Voice dictation</span>
+                      <span>7 languages</span>
+                    </div>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -625,56 +683,39 @@ Output clean markdown only.`,
               <h3>Preferences</h3>
               <button type="button" className="btn btn-subtle btn-small" onClick={() => setPreferencesOpen(false)}>Close</button>
             </div>
-
             <div className="pref-section">
               <p className="section-label">Note Type</p>
               <div className="pill-group">
                 {noteTypes.map((type) => (
-                  <button key={type} type="button"
-                    className={`btn btn-pill ${preferences.noteType === type ? 'is-active' : ''}`}
-                    onClick={() => setPreferences((p) => ({ ...p, noteType: type }))}
-                  >{type}</button>
+                  <button key={type} type="button" className={`btn btn-pill ${preferences.noteType === type ? 'is-active' : ''}`} onClick={() => setPreferences((p) => ({ ...p, noteType: type }))}>{type}</button>
                 ))}
               </div>
             </div>
-
             <div className="pref-section">
               <p className="section-label">Subject</p>
               <p className="pref-description">Enter your subject so the AI structures the summary accordingly.</p>
-              <input
-                type="text"
-                className="pref-text-input"
-                value={preferences.subjectMode}
+              <input type="text" className="pref-text-input" value={preferences.subjectMode}
                 onChange={(e) => setPreferences((p) => ({ ...p, subjectMode: e.target.value }))}
-                placeholder="e.g. Thermodynamics, Contract Law, Macroeconomics..."
-              />
+                placeholder="e.g. Thermodynamics, Contract Law, Macroeconomics..." />
             </div>
-
             <div className="pref-section">
               <p className="section-label">Summary Length</p>
               <div className="pill-group">
                 {summaryLengths.map((l) => (
-                  <button key={l} type="button"
-                    className={`btn btn-pill ${preferences.summaryLength === l ? 'is-active' : ''}`}
-                    onClick={() => setPreferences((p) => ({ ...p, summaryLength: l }))}
-                  >{l}</button>
+                  <button key={l} type="button" className={`btn btn-pill ${preferences.summaryLength === l ? 'is-active' : ''}`} onClick={() => setPreferences((p) => ({ ...p, summaryLength: l }))}>{l}</button>
                 ))}
               </div>
             </div>
-
             <div className="pref-section">
               <p className="section-label">Language</p>
               <select value={preferences.language} onChange={(e) => setPreferences((p) => ({ ...p, language: e.target.value }))} className="language-select">
                 {languages.map((l) => <option key={l} value={l}>{l}</option>)}
               </select>
             </div>
-
             <div className="pref-section">
               <p className="section-label">Style Examples</p>
               <p className="pref-description">Upload up to 3 example summaries. The AI will match their style.</p>
-              <button type="button" className="btn btn-subtle btn-small" onClick={() => examplesInputRef.current?.click()} disabled={preferences.styleExamples.length >= 3}>
-                Upload example
-              </button>
+              <button type="button" className="btn btn-subtle btn-small" onClick={() => examplesInputRef.current?.click()} disabled={preferences.styleExamples.length >= 3}>Upload example</button>
               <input ref={examplesInputRef} type="file" accept=".txt,.md,.pdf,.pptx,.ppt" multiple style={{ display: 'none' }} onChange={handleUploadExamples} />
               <div className="example-pills">
                 {preferences.styleExamples.map((ex) => (
@@ -688,11 +729,6 @@ Output clean markdown only.`,
           </div>
         </div>
       )}
-
-      {/* Hidden ref for copy/PDF */}
-      <div ref={richSummaryRef} style={{ position: 'fixed', left: '-9999px', top: 0, width: 800, backgroundColor: '#fff', color: '#000', padding: 32 }} aria-hidden="true">
-        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{editedSummary}</ReactMarkdown>
-      </div>
     </main>
   )
 }

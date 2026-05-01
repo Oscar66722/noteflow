@@ -689,3 +689,143 @@
 }
 .pref-text-input:focus { border-color: var(--accent); }
 .pref-text-input::placeholder { color: var(--text-muted); }
+
+/* Make the title look like a real document title */
+.note-title-input {
+  width: 100%;
+  font-size: 26px;
+  font-weight: 400;
+  font-family: 'Instrument Serif', serif;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0 0 12px 0;
+  border-bottom: 1.5px solid transparent;
+  display: block;
+  transition: border-color 0.15s;
+  line-height: 1.2;
+}
+.note-title-input:focus { border-bottom-color: var(--accent); }
+.note-title-input::placeholder { color: var(--text-muted); font-style: italic; }
+
+/* Stack header row vertically so title is full width on top */
+.summary-header-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+/* Toolbar sits below the title, left-aligned */
+.summary-toolbar {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+/* Remove the padding-top from markdown since toolbar is no longer absolute */
+.markdown-content {
+  padding-top: 0;
+}
+
+/* Also remove shimmer padding-top */
+.shimmer-wrap { padding-top: 0; }
+
+/* ── Tiptap editor ── */
+.tiptap-body {
+  outline: none;
+  min-height: 200px;
+  font-size: 15px;
+  line-height: 1.75;
+  color: var(--text);
+  font-family: 'DM Sans', sans-serif;
+  cursor: text;
+}
+
+.tiptap-body h1 { font-family: 'Instrument Serif', serif; font-weight: 400; font-size: 1.6em; margin: 0.8em 0 0.3em; }
+.tiptap-body h2 { font-family: 'Instrument Serif', serif; font-weight: 400; font-size: 1.25em; margin: 0.8em 0 0.3em; }
+.tiptap-body h3 { font-family: 'Instrument Serif', serif; font-weight: 400; font-size: 1.05em; margin: 0.8em 0 0.3em; }
+.tiptap-body p { margin: 0 0 0.6em; }
+.tiptap-body ul, .tiptap-body ol { padding-left: 1.4rem; margin: 0 0 0.6em; }
+.tiptap-body li { margin-bottom: 3px; }
+.tiptap-body strong { font-weight: 600; }
+.tiptap-body em { font-style: italic; }
+.tiptap-body code { background: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-size: 13px; font-family: monospace; }
+.tiptap-body p.is-empty:first-child::before { content: 'Start writing or click Summarize...'; color: var(--text-muted); pointer-events: none; float: left; height: 0; }
+
+/* ── Editor toolbar ── */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.toolbar-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  color: var(--text-secondary);
+  transition: all 0.12s;
+  min-width: 28px;
+  text-align: center;
+}
+.toolbar-btn:hover { background: var(--surface); color: var(--text); }
+.toolbar-btn.is-active { background: var(--text); color: white; }
+
+.toolbar-sep { width: 1px; height: 16px; background: var(--border); margin: 0 3px; flex-shrink: 0; }
+.toolbar-spacer { flex: 1; }
+
+/* Title input */
+.note-title-input {
+  width: 100%;
+  font-size: 26px;
+  font-weight: 400;
+  font-family: 'Instrument Serif', serif;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  padding: 0 0 14px 0;
+  border-bottom: 1.5px solid var(--border);
+  margin-bottom: 10px;
+  display: block;
+  line-height: 1.2;
+  transition: border-color 0.15s;
+}
+.note-title-input:focus { border-bottom-color: var(--accent); }
+.note-title-input::placeholder { color: var(--text-muted); font-style: italic; }
+
+/* Summary header row — no longer needed as separate row */
+.summary-header-row { display: none; }
+
+/* Markdown content padding reset */
+.markdown-content { padding-top: 0; }
+.shimmer-wrap { padding-top: 0; }
+
+/* Pref text input */
+.pref-text-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.pref-text-input:focus { border-color: var(--accent); }
+.pref-text-input::placeholder { color: var(--text-muted); }
