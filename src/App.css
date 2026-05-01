@@ -638,3 +638,18 @@
   .modal-header h3 { font-size: 20px; }
   .note-card-actions { opacity: 1; }
 }
+
+.pref-text-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.pref-text-input:focus { border-color: var(--accent); }
+.pref-text-input::placeholder { color: var(--text-muted); }

@@ -10,15 +10,18 @@ function App() {
   const storageKey = 'saved-study-notes'
   const preferencesKey = 'noteflow-preferences'
   const defaultPreferences = {
-    subjectMode: 'General',
+    subjectMode: '',
+    noteType: 'Lecture notes',
     summaryLength: 'Balanced',
     language: 'English',
     styleExamples: [],
   }
-  const subjectModes = [
-    'General', 'Science & Maths', 'History & Humanities',
-    'Law', 'Literature', 'Computer Science', 'Economics & Business',
+
+  const noteTypes = [
+    'Lecture notes', 'Meeting notes', 'Research notes',
+    'Book notes', 'Interview notes', 'Personal notes',
   ]
+
   const summaryLengths = ['Brief', 'Balanced', 'Detailed']
   const languages = ['English', 'Spanish', 'French', 'German', 'Dutch', 'Italian', 'Portuguese']
 
@@ -280,7 +283,8 @@ Rules:
 - If the notes contain text from uploaded files (marked with "--- Uploaded: filename ---"), treat it as source material and integrate it naturally. For PowerPoint slides marked [Slide N], treat each as a separate topic or section.
 
 Preferences:
-- Subject mode: ${preferences.subjectMode} — ${subjectInstructions[preferences.subjectMode]}
+- Note type: ${preferences.noteType} — structure and tone should match this format
+- Subject: ${preferences.subjectMode || 'not specified'} — tailor terminology and structure to this subject if provided
 - Summary length: ${preferences.summaryLength} — ${lengthInstructions[preferences.summaryLength]}
 - Language: ${preferences.language} — write the entire summary in ${preferences.language}
 ${styleExamplesSection}
@@ -591,14 +595,25 @@ Output clean markdown only.`,
               <h3>Preferences</h3>
               <button type="button" className="btn btn-subtle btn-small" onClick={() => setPreferencesOpen(false)}>Close</button>
             </div>
-            <div className="pref-section">
-              <p className="section-label">Subject Mode</p>
-              <div className="pill-group">
-                {subjectModes.map((mode) => (
-                  <button key={mode} type="button" className={`btn btn-pill ${preferences.subjectMode === mode ? 'is-active' : ''}`} onClick={() => setPreferences((p) => ({ ...p, subjectMode: mode }))}>{mode}</button>
-                ))}
+              <div className="pref-section">
+                <p className="section-label">Subject</p>
+                <p className="pref-description">Enter your subject or topic so the AI structures the summary accordingly.</p>
+                <input
+                  type="text"
+                  className="pref-text-input"
+                  value={preferences.subjectMode}
+                  onChange={(e) => setPreferences((p) => ({ ...p, subjectMode: e.target.value }))}
+                  placeholder="e.g. Thermodynamics, Contract Law, Macroeconomics..."
+                />
               </div>
-            </div>
+              <div className="pref-section">
+                <p className="section-label">Note Type</p>
+                <div className="pill-group">
+                  {noteTypes.map((type) => (
+                    <button key={type} type="button" className={`btn btn-pill ${preferences.noteType === type ? 'is-active' : ''}`} onClick={() => setPreferences((p) => ({ ...p, noteType: type }))}>{type}</button>
+                  ))}
+                </div>
+              </div>
             <div className="pref-section">
               <p className="section-label">Summary Length</p>
               <div className="pill-group">
