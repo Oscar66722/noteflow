@@ -31,7 +31,6 @@ const inlineMd = (text) =>
 const isTableRow = (line) => /^\|.+\|$/.test(line.trim())
 const isSeparatorRow = (line) => /^\|[-| :]+\|$/.test(line.trim())
 
-
 const markdownToHtml = (md) => {
   if (!md.trim()) return '<p></p>'
   const lines = md.split('\n')
@@ -97,6 +96,35 @@ function ToolbarBtn({ onClick, active, title, children }) {
 
 function ToolbarSep() { return <div className="toolbar-sep" /> }
 
+// ── Usage limit ───────────────────────────────────────────────────────────────
+const DAILY_LIMIT = 10
+const usageLimitKey = 'noteflow-usage'
+
+const getUsage = () => {
+  try {
+    const raw = localStorage.getItem(usageLimitKey)
+    if (!raw) return { count: 0, date: '' }
+    return JSON.parse(raw)
+  } catch { return { count: 0, date: '' } }
+}
+
+const getTodayStr = () => new Date().toISOString().split('T')[0]
+
+const incrementUsage = () => {
+  const today = getTodayStr()
+  const usage = getUsage()
+  const count = usage.date === today ? usage.count + 1 : 1
+  localStorage.setItem(usageLimitKey, JSON.stringify({ count, date: today }))
+  return count
+}
+
+const getRemainingUsage = () => {
+  const today = getTodayStr()
+  const usage = getUsage()
+  if (usage.date !== today) return DAILY_LIMIT
+  return Math.max(0, DAILY_LIMIT - usage.count)
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   const storageKey = 'saved-study-notes'
@@ -109,6 +137,7 @@ function App() {
   const summaryLengths = ['Brief', 'Balanced', 'Detailed']
   const languages = ['English', 'Spanish', 'French', 'German', 'Dutch', 'Italian', 'Portuguese']
 
+  const [usageRemaining, setUsageRemaining] = useState(() => getRemainingUsage())
   const [notes, setNotes] = useState('')
   const [streamBuffer, setStreamBuffer] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -261,7 +290,11 @@ function App() {
     const pdfjs = await loadPdfJs()
     const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise
     const pages = []
-    for (let i = 1; i <= pdf.numPages; i++) { const page = await pdf.getPage(i); const c = await page.getTextContent(); pages.push(c.items.map((item) => item.str).join(' ')) }
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i)
+      const c = await page.getTextContent()
+      pages.push(c.items.map((item) => item.str).join(' '))
+    }
     return pages.join('\n\n')
   }
 
@@ -275,15 +308,22 @@ function App() {
   const readPptxFile = async (file) => {
     const JSZip = await loadJSZip()
     const zip = await JSZip.loadAsync(await file.arrayBuffer())
-    const slideFiles = Object.keys(zip.files).filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n)).sort((a, b) => parseInt(a.match(/\d+/)?.[0] || '0') - parseInt(b.match(/\d+/)?.[0] || '0'))
+    const slideFiles = Object.keys(zip.files)
+      .filter((n) => /^ppt\/slides\/slide\d+\.xml$/.test(n))
+      .sort((a, b) => parseInt(a.match(/\d+/)?.[0] || '0') - parseInt(b.match(/\d+/)?.[0] || '0'))
     if (!slideFiles.length) throw new Error('No slides found.')
-    const extractText = (xml) => (xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) || []).map((m) => m.replace(/<[^>]+>/g, '').trim()).filter(Boolean).join(' ')
+    const extractText = (xml) =>
+      (xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) || []).map((m) => m.replace(/<[^>]+>/g, '').trim()).filter(Boolean).join(' ')
     const slideTexts = []
     for (let i = 0; i < slideFiles.length; i++) {
-      const slideNum = i + 1; const slideText = extractText(await zip.files[slideFiles[i]].async('text')); let notesText = ''
+      const slideNum = i + 1
+      const slideText = extractText(await zip.files[slideFiles[i]].async('text'))
+      let notesText = ''
       const notesPath = `ppt/notesSlides/notesSlide${slideNum}.xml`
       if (zip.files[notesPath]) notesText = extractText(await zip.files[notesPath].async('text'))
-      const parts = []; if (slideText.trim()) parts.push(`Slide content: ${slideText.trim()}`); if (notesText.trim()) parts.push(`Speaker notes: ${notesText.trim()}`)
+      const parts = []
+      if (slideText.trim()) parts.push(`Slide content: ${slideText.trim()}`)
+      if (notesText.trim()) parts.push(`Speaker notes: ${notesText.trim()}`)
       if (parts.length) slideTexts.push(`[Slide ${slideNum}]\n${parts.join('\n')}`)
     }
     return slideTexts.join('\n\n')
@@ -297,29 +337,51 @@ function App() {
         const lower = file.name.toLowerCase(); let text = ''
         if (lower.endsWith('.pdf')) text = await readPdfFile(file)
         else if (lower.endsWith('.pptx') || lower.endsWith('.ppt')) text = await readPptxFile(file)
-        if (text.trim()) { setNotes((p) => p.trim() ? `${p}\n\n--- Uploaded: ${file.name} ---\n\n${text.trim()}` : `--- Uploaded: ${file.name} ---\n\n${text.trim()}`); setUploadedFiles((p) => [...p, file.name]) }
-        else alert(`No readable text found in ${file.name}.`)
+        if (text.trim()) {
+          setNotes((p) => p.trim() ? `${p}\n\n--- Uploaded: ${file.name} ---\n\n${text.trim()}` : `--- Uploaded: ${file.name} ---\n\n${text.trim()}`)
+          setUploadedFiles((p) => [...p, file.name])
+        } else {
+          alert(`No readable text found in ${file.name}.`)
+        }
       }
     } catch (err) { alert(`Could not read file: ${err.message}`) }
     finally { setFileLoading(false) }
   }
 
-  const handleFileUpload = async (e) => { const files = Array.from(e.target.files || []); if (files.length) await appendFileToNotes(files); e.target.value = '' }
+  const handleFileUpload = async (e) => {
+    const files = Array.from(e.target.files || [])
+    if (files.length) await appendFileToNotes(files)
+    e.target.value = ''
+  }
+
   const handleDrop = async (e) => {
     e.preventDefault()
-    const files = Array.from(e.dataTransfer.files).filter((f) => { const l = f.name.toLowerCase(); return l.endsWith('.pdf') || l.endsWith('.pptx') || l.endsWith('.ppt') })
+    const files = Array.from(e.dataTransfer.files).filter((f) => {
+      const l = f.name.toLowerCase()
+      return l.endsWith('.pdf') || l.endsWith('.pptx') || l.endsWith('.ppt')
+    })
     if (files.length) await appendFileToNotes(files)
   }
 
   // ── Summarize ─────────────────────────────────────────────────────────────────
   const handleSummarize = async () => {
     if (!notes.trim() || loading) return
+    if (usageRemaining <= 0) {
+      alert("You've used all 10 of your free summaries for today. Come back tomorrow for more.")
+      return
+    }
+
     try {
       setLoading(true); setStreaming(true); setStreamBuffer(''); setViewMarkdown('')
       setIsDirty(false); setEditMode(false); setNoteTitle(autoTitle(notes))
-      currentNoteIdRef.current = null; if (editor) editor.commands.clearContent()
+      currentNoteIdRef.current = null
+      if (editor) editor.commands.clearContent()
 
-      const lengthInstructions = { Brief: 'Bullet points only, very concise.', Balanced: 'Concise but useful detail.', Detailed: 'Include explanations, examples, and context.' }
+      const lengthInstructions = {
+        Brief: 'Bullet points only, very concise.',
+        Balanced: 'Concise but useful detail.',
+        Detailed: 'Include explanations, examples, and context.',
+      }
       const noteTypeInstructions = {
         'Lecture notes': 'Structure as a study guide with key concepts, definitions, and important details.',
         'Meeting notes': 'Structure with decisions made, action items, and key discussion points.',
@@ -328,13 +390,22 @@ function App() {
         'Interview notes': 'Structure with key themes and notable insights.',
         'Personal notes': 'Structure naturally based on the content.',
       }
-      const styleExamplesSection = preferences.styleExamples.length > 0 ? `\nMatch the style of these examples:\n---\n${preferences.styleExamples.map((e) => e.text).join('\n---\n')}\n---\n` : ''
+      const styleExamplesSection = preferences.styleExamples.length > 0
+        ? `\nMatch the style of these examples:\n---\n${preferences.styleExamples.map((e) => e.text).join('\n---\n')}\n---\n`
+        : ''
 
       const response = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-api-key': import.meta.env.VITE_ANTHROPIC_KEY, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': import.meta.env.VITE_ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
         body: JSON.stringify({
-          model: 'claude-haiku-4-5-20251001', max_tokens: 1024, stream: true,
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1024,
+          stream: true,
           system: `You are a study assistant. Transform raw notes into a clean, structured summary.
 Rules:
 - Decide what structure fits THIS content — never use the same template twice
@@ -361,27 +432,43 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
       if (!response.ok) throw new Error((await response.text()) || 'Failed to summarize.')
       if (!response.body) throw new Error('No stream returned.')
 
-      const reader = response.body.getReader(); const decoder = new TextDecoder()
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
       let done = false, buffer = '', accumulated = '', receivedFirstChunk = false
 
       while (!done) {
-        const { value, done: rd } = await reader.read(); done = rd
+        const { value, done: rd } = await reader.read()
+        done = rd
         buffer += decoder.decode(value || new Uint8Array(), { stream: !done })
-        const parts = buffer.split('\n\n'); buffer = parts.pop() || ''
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() || ''
         for (const part of parts) {
           if (!part.includes('data: ')) continue
           for (const dataChunk of part.split('data: ').slice(1)) {
-            const payload = dataChunk.trim(); if (!payload || payload === '[DONE]') continue
-            const parsed = JSON.parse(payload); if (parsed.type === 'message_stop') { done = true; break }
+            const payload = dataChunk.trim()
+            if (!payload || payload === '[DONE]') continue
+            const parsed = JSON.parse(payload)
+            if (parsed.type === 'message_stop') { done = true; break }
             const dt = parsed?.delta?.text
-            if (dt) { if (!receivedFirstChunk) { setLoading(false); receivedFirstChunk = true } accumulated += dt; setStreamBuffer(accumulated) }
+            if (dt) {
+              if (!receivedFirstChunk) { setLoading(false); receivedFirstChunk = true }
+              accumulated += dt
+              setStreamBuffer(accumulated)
+            }
           }
           if (done) break
         }
       }
+
       if (!receivedFirstChunk) setStreamBuffer('No summary returned.')
-    } catch (error) { setStreamBuffer(`Unable to generate summary. ${error.message}`) }
-    finally { setLoading(false); setStreaming(false) }
+      incrementUsage()
+      setUsageRemaining(getRemainingUsage())
+    } catch (error) {
+      setStreamBuffer(`Unable to generate summary. ${error.message}`)
+    } finally {
+      setLoading(false)
+      setStreaming(false)
+    }
   }
 
   // ── Save ──────────────────────────────────────────────────────────────────────
@@ -404,12 +491,17 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
   const handleLoadSavedNote = (note) => {
     setNotes(note.notes); setNoteTitle(note.title); setIsDirty(false); setEditMode(false)
     currentNoteIdRef.current = note.id; setSidebarOpen(false); setUploadedFiles([])
-    const summary = note.summary || ''; setViewMarkdown(summary); setStreamBuffer(summary)
-    if (editor) { const html = summary.trim().startsWith('<') ? summary : markdownToHtml(summary); editor.commands.setContent(html, false) }
+    const summary = note.summary || ''
+    setViewMarkdown(summary); setStreamBuffer(summary)
+    if (editor) {
+      const html = summary.trim().startsWith('<') ? summary : markdownToHtml(summary)
+      editor.commands.setContent(html, false)
+    }
   }
 
   const handleDeleteSavedNote = (id) => {
-    const updated = savedNotes.filter((n) => n.id !== id); setSavedNotes(updated)
+    const updated = savedNotes.filter((n) => n.id !== id)
+    setSavedNotes(updated)
     localStorage.setItem(storageKey, JSON.stringify(updated))
     if (currentNoteIdRef.current === id) currentNoteIdRef.current = null
   }
@@ -434,10 +526,16 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
     clone.querySelectorAll('td').forEach((td) => { td.style.border = '1px solid black'; td.style.padding = '6px 12px' })
     try {
       if (window.ClipboardItem && navigator.clipboard?.write) {
-        await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([clone.innerHTML], { type: 'text/html' }), 'text/plain': new Blob([richSummaryRef.current.innerText], { type: 'text/plain' }) })])
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([clone.innerHTML], { type: 'text/html' }),
+          'text/plain': new Blob([richSummaryRef.current.innerText], { type: 'text/plain' }),
+        })])
       } else {
-        const d = document.createElement('div'); d.contentEditable = 'true'; d.style.cssText = 'position:fixed;left:-9999px'; d.innerHTML = clone.innerHTML; document.body.appendChild(d)
-        const r = document.createRange(); r.selectNodeContents(d); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); document.execCommand('copy'); s.removeAllRanges(); document.body.removeChild(d)
+        const d = document.createElement('div'); d.contentEditable = 'true'; d.style.cssText = 'position:fixed;left:-9999px'
+        d.innerHTML = clone.innerHTML; document.body.appendChild(d)
+        const r = document.createRange(); r.selectNodeContents(d)
+        const s = window.getSelection(); s.removeAllRanges(); s.addRange(r)
+        document.execCommand('copy'); s.removeAllRanges(); document.body.removeChild(d)
       }
       setCopied(true); setTimeout(() => setCopied(false), 2000)
     } catch {}
@@ -456,14 +554,23 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
     if (!SR) { alert('Please use Chrome for voice input'); return }
     const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'
-    rec.onresult = (e) => { let chunk = ''; for (let i = e.resultIndex; i < e.results.length; i++) chunk += e.results[i][0].transcript; if (chunk.trim()) setNotes((p) => `${p}${p ? ' ' : ''}${chunk.trim()}`) }
+    rec.onresult = (e) => {
+      let chunk = ''
+      for (let i = e.resultIndex; i < e.results.length; i++) chunk += e.results[i][0].transcript
+      if (chunk.trim()) setNotes((p) => `${p}${p ? ' ' : ''}${chunk.trim()}`)
+    }
     rec.onend = () => { setIsRecording(false); recognitionRef.current = null }
     rec.onerror = () => { setIsRecording(false); recognitionRef.current = null }
     recognitionRef.current = rec; rec.start(); setIsRecording(true)
   }
 
   // ── Style examples ────────────────────────────────────────────────────────────
-  const readTextFile = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result || '')); r.onerror = () => rej(new Error(`Unable to read ${file.name}`)); r.readAsText(file) })
+  const readTextFile = (file) => new Promise((res, rej) => {
+    const r = new FileReader()
+    r.onload = () => res(String(r.result || ''))
+    r.onerror = () => rej(new Error(`Unable to read ${file.name}`))
+    r.readAsText(file)
+  })
 
   const handleUploadExamples = async (event) => {
     const files = Array.from(event.target.files || []).slice(0, 3 - preferences.styleExamples.length)
@@ -471,7 +578,9 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
       const parsed = []
       for (const file of files) {
         const lower = file.name.toLowerCase()
-        let text = lower.endsWith('.pdf') ? await readPdfFile(file) : (lower.endsWith('.pptx') || lower.endsWith('.ppt')) ? await readPptxFile(file) : await readTextFile(file)
+        let text = lower.endsWith('.pdf') ? await readPdfFile(file)
+          : (lower.endsWith('.pptx') || lower.endsWith('.ppt')) ? await readPptxFile(file)
+          : await readTextFile(file)
         if (text.trim()) parsed.push({ id: `${Date.now()}-${file.name}`, name: file.name, text: text.trim() })
       }
       if (parsed.length) setPreferences((p) => ({ ...p, styleExamples: [...p.styleExamples, ...parsed].slice(0, 3) }))
@@ -502,7 +611,8 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
           <div key={note.id} className="saved-note-card">
             {renamingId === note.id ? (
               <div className="rename-row">
-                <input className="rename-input" value={renameValue} onChange={(e) => setRenameValue(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') handleRenameNote(note.id); if (e.key === 'Escape') setRenamingId(null) }} autoFocus />
+                <input className="rename-input" value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleRenameNote(note.id); if (e.key === 'Escape') setRenamingId(null) }} autoFocus />
                 <button type="button" className="btn btn-subtle btn-small" onClick={() => handleRenameNote(note.id)}>Done</button>
               </div>
             ) : (
@@ -524,38 +634,63 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
         <div className="panel notes-panel">
           <div className="panel-label-row">
             <label htmlFor="notes" className="section-label">Notes</label>
-            {notes.trim() && <span className={`word-counter ${isLong ? 'is-long' : ''}`}>{wordCount} words{isLong && <span className="counter-warning"> — getting long</span>}</span>}
+            {notes.trim() && (
+              <span className={`word-counter ${isLong ? 'is-long' : ''}`}>
+                {wordCount} words{isLong && <span className="counter-warning"> — getting long</span>}
+              </span>
+            )}
           </div>
           <div className="pdf-dropzone" onDragOver={(e) => e.preventDefault()} onDrop={handleDrop} onClick={() => fileInputRef.current?.click()}>
-            {fileLoading ? <span className="muted-copy">Reading file...</span> : <span className="muted-copy">Upload <strong>PDF</strong> or <strong>PowerPoint</strong> — drag here or click</span>}
+            {fileLoading ? <span className="muted-copy">Reading file...</span>
+              : <span className="muted-copy">Upload <strong>PDF</strong> or <strong>PowerPoint</strong> — drag here or click</span>}
           </div>
           <input ref={fileInputRef} type="file" accept=".pdf,.pptx,.ppt" multiple style={{ display: 'none' }} onChange={handleFileUpload} />
           {uploadedFiles.length > 0 && (
             <div className="example-pills" style={{ marginBottom: 8 }}>
               {uploadedFiles.map((name, i) => (
-                <span key={i} className="example-pill">{name}<button type="button" className="pill-remove" onClick={() => setUploadedFiles((p) => p.filter((_, j) => j !== i))}>Remove</button></span>
+                <span key={i} className="example-pill">
+                  {name}
+                  <button type="button" className="pill-remove" onClick={() => setUploadedFiles((p) => p.filter((_, j) => j !== i))}>Remove</button>
+                </span>
               ))}
             </div>
           )}
-          <textarea id="notes" className="notes-input" value={notes} onChange={(e) => setNotes(e.target.value)} placeholder={"Type or paste notes here, or upload a file above.\n\nCmd+Enter to summarize."} />
+          <textarea id="notes" className="notes-input" value={notes} onChange={(e) => setNotes(e.target.value)}
+            placeholder={"Type or paste notes here, or upload a file above.\n\nCmd+Enter to summarize."} />
           <div className="panel-actions">
-            <button type="button" disabled={loading} onClick={handleSummarize} className="btn btn-summarize">Summarize</button>
-            <button type="button" onClick={handleToggleRecording} className={`btn btn-mic ${isRecording ? 'is-recording' : ''}`}>{isRecording ? 'Stop recording' : 'Dictate'}</button>
+            <button type="button" disabled={loading || usageRemaining <= 0} onClick={handleSummarize} className="btn btn-summarize">
+              Summarize
+            </button>
+            <button type="button" onClick={handleToggleRecording} className={`btn btn-mic ${isRecording ? 'is-recording' : ''}`}>
+              {isRecording ? 'Stop recording' : 'Dictate'}
+            </button>
             {isRecording && <span className="recording-indicator">Recording</span>}
+            {usageRemaining < DAILY_LIMIT && (
+              <span className="usage-counter">
+                {usageRemaining}/{DAILY_LIMIT} left today
+              </span>
+            )}
           </div>
         </div>
 
         {/* RIGHT */}
         <div className="panel summary-panel">
           <div className="summary-title-row">
-            <input className="note-title-input" value={noteTitle} onChange={(e) => { setNoteTitle(e.target.value); setIsDirty(true) }} placeholder="Untitled note" />
+            <input className="note-title-input" value={noteTitle}
+              onChange={(e) => { setNoteTitle(e.target.value); setIsDirty(true) }} placeholder="Untitled note" />
             {hasSummary && (
               <div className="summary-actions">
                 {autoSaveLabel && <span className="autosave-label">{autoSaveLabel}</span>}
-                <button type="button" onClick={handleToggleEditMode} className={`btn btn-subtle btn-small ${editMode ? 'btn-edit-active' : ''}`}>{editMode ? 'Done' : 'Edit'}</button>
-                <button type="button" onClick={handleCopySummary} className={`btn btn-subtle btn-small ${copied ? 'is-copied' : ''}`}>{copied ? 'Copied' : 'Copy'}</button>
+                <button type="button" onClick={handleToggleEditMode} className={`btn btn-subtle btn-small ${editMode ? 'btn-edit-active' : ''}`}>
+                  {editMode ? 'Done' : 'Edit'}
+                </button>
+                <button type="button" onClick={handleCopySummary} className={`btn btn-subtle btn-small ${copied ? 'is-copied' : ''}`}>
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
                 <button type="button" onClick={handleDownloadPdf} className="btn btn-subtle btn-small">Export PDF</button>
-                <button type="button" onClick={handleSaveNote} className={`btn btn-subtle btn-small save-btn ${isDirty ? 'is-dirty' : ''}`}>{isDirty && <span className="dirty-dot" />}{saveLabel}</button>
+                <button type="button" onClick={handleSaveNote} className={`btn btn-subtle btn-small save-btn ${isDirty ? 'is-dirty' : ''}`}>
+                  {isDirty && <span className="dirty-dot" />}{saveLabel}
+                </button>
               </div>
             )}
           </div>
@@ -564,17 +699,13 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
           {editMode && hasSummary && editor && (
             <div className="editor-toolbar-wrap">
               <div className="editor-toolbar">
-                {/* Text style */}
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} title="Bold (Cmd+B)"><strong>B</strong></ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} title="Italic (Cmd+I)"><em>I</em></ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} title="Underline (Cmd+U)"><u>U</u></ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive('strike')} title="Strikethrough"><s>S</s></ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleSubscript().run()} active={editor.isActive('subscript')} title="Subscript">x₂</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleSuperscript().run()} active={editor.isActive('superscript')} title="Superscript">x²</ToolbarBtn>
-
                 <ToolbarSep />
-
-                {/* Highlight */}
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleHighlight({ color: '#fef08a' }).run()} active={editor.isActive('highlight', { color: '#fef08a' })} title="Highlight yellow">
                   <span style={{ background: '#fef08a', padding: '0 3px', borderRadius: 2 }}>H</span>
                 </ToolbarBtn>
@@ -587,53 +718,31 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
                 <ToolbarBtn onClick={() => editor.chain().focus().unsetHighlight().run()} active={false} title="Remove highlight">
                   <span style={{ textDecoration: 'line-through', fontSize: 11 }}>H</span>
                 </ToolbarBtn>
-
                 <ToolbarSep />
-
-                {/* Headings */}
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive('heading', { level: 1 })} title="Heading 1">H1</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} title="Heading 2">H2</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} active={editor.isActive('heading', { level: 3 })} title="Heading 3">H3</ToolbarBtn>
-
                 <ToolbarSep />
-
-                {/* Lists & structure */}
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive('bulletList')} title="Bullet list">• List</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive('orderedList')} title="Numbered list">1. List</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleBlockquote().run()} active={editor.isActive('blockquote')} title="Blockquote">" "</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().setHorizontalRule().run()} active={false} title="Divider">—</ToolbarBtn>
-
                 <ToolbarSep />
-
-                {/* Alignment */}
                 <ToolbarBtn onClick={() => editor.chain().focus().setTextAlign('left').run()} active={editor.isActive({ textAlign: 'left' })} title="Align left">≡L</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().setTextAlign('center').run()} active={editor.isActive({ textAlign: 'center' })} title="Align center">≡C</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().setTextAlign('right').run()} active={editor.isActive({ textAlign: 'right' })} title="Align right">≡R</ToolbarBtn>
-
                 <ToolbarSep />
-
-                {/* Link */}
                 <ToolbarBtn onClick={handleLinkBtn} active={editor.isActive('link')} title="Add link">🔗</ToolbarBtn>
-
                 <ToolbarSep />
-
-                {/* History */}
                 <ToolbarBtn onClick={() => editor.chain().focus().undo().run()} active={false} title="Undo">↩</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().redo().run()} active={false} title="Redo">↪</ToolbarBtn>
               </div>
-
-              {/* Link input row */}
               {showLinkInput && (
                 <div className="link-input-row">
-                  <input
-                    ref={linkInputRef}
-                    type="text"
-                    className="link-input"
-                    value={linkUrl}
+                  <input ref={linkInputRef} type="text" className="link-input" value={linkUrl}
                     onChange={(e) => setLinkUrl(e.target.value)}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleSetLink(); if (e.key === 'Escape') setShowLinkInput(false) }}
-                    placeholder="https://..."
-                  />
+                    placeholder="https://..." />
                   <button type="button" className="btn btn-subtle btn-small" onClick={handleSetLink}>Apply</button>
                   <button type="button" className="btn btn-subtle btn-small" onClick={() => setShowLinkInput(false)}>Cancel</button>
                 </div>
@@ -668,7 +777,9 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
               <div className="empty-state">
                 <p className="empty-state-title">Your summary will appear here</p>
                 <p className="empty-state-body">Paste notes or upload a file on the left,<br />then press <kbd>Summarize</kbd> or <kbd>Cmd Enter</kbd>.</p>
-                <div className="empty-state-hints"><span>PDF upload</span><span>PowerPoint</span><span>Voice dictation</span><span>7 languages</span></div>
+                <div className="empty-state-hints">
+                  <span>PDF upload</span><span>PowerPoint</span><span>Voice dictation</span><span>7 languages</span>
+                </div>
               </div>
             )}
           </div>
@@ -677,26 +788,43 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
 
       {/* Hidden ref for copy/PDF */}
       <div ref={richSummaryRef} style={{ position: 'fixed', left: '-9999px', top: 0, width: 800, backgroundColor: '#fff', color: '#000', padding: 32 }} aria-hidden="true">
-        {isHtmlContent ? <div dangerouslySetInnerHTML={{ __html: viewMarkdown }} /> : <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{viewMarkdown}</ReactMarkdown>}
+        {isHtmlContent
+          ? <div dangerouslySetInnerHTML={{ __html: viewMarkdown }} />
+          : <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{viewMarkdown}</ReactMarkdown>}
       </div>
 
       {/* Preferences */}
       {preferencesOpen && (
         <div className="modal-backdrop">
           <div className="preferences-modal">
-            <div className="modal-header"><h3>Preferences</h3><button type="button" className="btn btn-subtle btn-small" onClick={() => setPreferencesOpen(false)}>Close</button></div>
+            <div className="modal-header">
+              <h3>Preferences</h3>
+              <button type="button" className="btn btn-subtle btn-small" onClick={() => setPreferencesOpen(false)}>Close</button>
+            </div>
             <div className="pref-section">
               <p className="section-label">Note Type</p>
-              <div className="pill-group">{noteTypes.map((type) => <button key={type} type="button" className={`btn btn-pill ${preferences.noteType === type ? 'is-active' : ''}`} onClick={() => setPreferences((p) => ({ ...p, noteType: type }))}>{type}</button>)}</div>
+              <div className="pill-group">
+                {noteTypes.map((type) => (
+                  <button key={type} type="button" className={`btn btn-pill ${preferences.noteType === type ? 'is-active' : ''}`}
+                    onClick={() => setPreferences((p) => ({ ...p, noteType: type }))}>{type}</button>
+                ))}
+              </div>
             </div>
             <div className="pref-section">
               <p className="section-label">Subject</p>
               <p className="pref-description">Enter your subject so the AI structures the summary accordingly.</p>
-              <input type="text" className="pref-text-input" value={preferences.subjectMode} onChange={(e) => setPreferences((p) => ({ ...p, subjectMode: e.target.value }))} placeholder="e.g. Thermodynamics, Contract Law, Macroeconomics..." />
+              <input type="text" className="pref-text-input" value={preferences.subjectMode}
+                onChange={(e) => setPreferences((p) => ({ ...p, subjectMode: e.target.value }))}
+                placeholder="e.g. Thermodynamics, Contract Law, Macroeconomics..." />
             </div>
             <div className="pref-section">
               <p className="section-label">Summary Length</p>
-              <div className="pill-group">{summaryLengths.map((l) => <button key={l} type="button" className={`btn btn-pill ${preferences.summaryLength === l ? 'is-active' : ''}`} onClick={() => setPreferences((p) => ({ ...p, summaryLength: l }))}>{l}</button>)}</div>
+              <div className="pill-group">
+                {summaryLengths.map((l) => (
+                  <button key={l} type="button" className={`btn btn-pill ${preferences.summaryLength === l ? 'is-active' : ''}`}
+                    onClick={() => setPreferences((p) => ({ ...p, summaryLength: l }))}>{l}</button>
+                ))}
+              </div>
             </div>
             <div className="pref-section">
               <p className="section-label">Language</p>
@@ -707,11 +835,15 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
             <div className="pref-section">
               <p className="section-label">Style Examples</p>
               <p className="pref-description">Upload up to 3 example summaries. The AI will match their style.</p>
-              <button type="button" className="btn btn-subtle btn-small" onClick={() => examplesInputRef.current?.click()} disabled={preferences.styleExamples.length >= 3}>Upload example</button>
+              <button type="button" className="btn btn-subtle btn-small" onClick={() => examplesInputRef.current?.click()}
+                disabled={preferences.styleExamples.length >= 3}>Upload example</button>
               <input ref={examplesInputRef} type="file" accept=".txt,.md,.pdf,.pptx,.ppt" multiple style={{ display: 'none' }} onChange={handleUploadExamples} />
               <div className="example-pills">
                 {preferences.styleExamples.map((ex) => (
-                  <span key={ex.id} className="example-pill">{ex.name}<button type="button" onClick={() => setPreferences((p) => ({ ...p, styleExamples: p.styleExamples.filter((e) => e.id !== ex.id) }))} className="pill-remove">Remove</button></span>
+                  <span key={ex.id} className="example-pill">
+                    {ex.name}
+                    <button type="button" onClick={() => setPreferences((p) => ({ ...p, styleExamples: p.styleExamples.filter((e) => e.id !== ex.id) }))} className="pill-remove">Remove</button>
+                  </span>
                 ))}
               </div>
             </div>
