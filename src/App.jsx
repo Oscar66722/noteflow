@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -28,6 +28,7 @@ function App() {
   const [noteTitle, setNoteTitle] = useState('')
   const [isDirty, setIsDirty] = useState(false)
   const [saveLabel, setSaveLabel] = useState('Save Note')
+  const [autoSaveLabel, setAutoSaveLabel] = useState(null) // "Auto-saved" flash
   const [loading, setLoading] = useState(false)
   const [fileLoading, setFileLoading] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -43,6 +44,7 @@ function App() {
   const examplesInputRef = useRef(null)
   const fileInputRef = useRef(null)
   const currentNoteIdRef = useRef(null)
+  const autoSaveTimerRef = useRef(null)
 
   const [preferences, setPreferences] = useState(() => {
     try {
@@ -58,14 +60,48 @@ function App() {
     } catch { return [] }
   })
 
-  // Cmd+S / Ctrl+S to save
+  // ── Word / char counter ──────────────────────────────────────────────────────
+  const wordCount = notes.trim() ? notes.trim().split(/\s+/).length : 0
+  const charCount = notes.length
+  const isLong = wordCount > 800 // warn when notes are getting long
+
+  // ── Auto-save every 30 seconds when there's unsaved content ─────────────────
+  const doAutoSave = useCallback(() => {
+    if (!editedSummary.trim() || !isDirty) return
+    const title = noteTitle.trim() || autoTitle(notes)
+    const updatedNotes = [...savedNotes]
+
+    if (currentNoteIdRef.current) {
+      const idx = updatedNotes.findIndex((n) => n.id === currentNoteIdRef.current)
+      if (idx !== -1) {
+        updatedNotes[idx] = { ...updatedNotes[idx], title, notes, summary: editedSummary, timestamp: new Date().toISOString() }
+      }
+    } else {
+      const newNote = { id: Date.now().toString(), title, notes, summary: editedSummary, timestamp: new Date().toISOString() }
+      currentNoteIdRef.current = newNote.id
+      updatedNotes.unshift(newNote)
+    }
+
+    setSavedNotes(updatedNotes)
+    localStorage.setItem(storageKey, JSON.stringify(updatedNotes))
+    setIsDirty(false)
+    setAutoSaveLabel('Auto-saved')
+    setTimeout(() => setAutoSaveLabel(null), 2000)
+  }, [editedSummary, isDirty, noteTitle, notes, savedNotes])
+
+  useEffect(() => {
+    if (!isDirty || !editedSummary.trim()) return
+    autoSaveTimerRef.current = setTimeout(doAutoSave, 30000)
+    return () => clearTimeout(autoSaveTimerRef.current)
+  }, [isDirty, editedSummary, doAutoSave])
+
+  // ── Keyboard shortcuts ───────────────────────────────────────────────────────
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
         if (editedSummary.trim()) handleSaveNote()
       }
-      // Cmd+Enter to summarize
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault()
         if (notes.trim() && !loading) handleSummarize()
@@ -78,8 +114,22 @@ function App() {
   const autoTitle = (text) =>
     text.trim().split(/\s+/).slice(0, 6).join(' ') || 'Untitled Note'
 
-  // ── PDF.js ───────────────────────────────────────────────────────────────────
+  // ── New note ─────────────────────────────────────────────────────────────────
+  const handleNewNote = () => {
+    if (isDirty && editedSummary.trim()) {
+      if (!window.confirm('You have unsaved changes. Start a new note anyway?')) return
+    }
+    setNotes('')
+    setSummary('')
+    setEditedSummary('')
+    setNoteTitle('')
+    setIsDirty(false)
+    setUploadedFiles([])
+    currentNoteIdRef.current = null
+    setSaveLabel('Save Note')
+  }
 
+  // ── PDF.js ───────────────────────────────────────────────────────────────────
   const loadPdfJs = () =>
     new Promise((resolve, reject) => {
       if (window.pdfjsLib) {
@@ -114,7 +164,6 @@ function App() {
   }
 
   // ── JSZip / PPTX ─────────────────────────────────────────────────────────────
-
   const loadJSZip = () =>
     new Promise((resolve, reject) => {
       if (window.JSZip) { resolve(window.JSZip); return }
@@ -159,7 +208,6 @@ function App() {
   }
 
   // ── File upload ───────────────────────────────────────────────────────────────
-
   const appendFileToNotes = async (files) => {
     setFileLoading(true)
     try {
@@ -205,7 +253,6 @@ function App() {
   }
 
   // ── Summarize ───────────────────────────────────────────────────────────────
-
   const handleSummarize = async () => {
     if (!notes.trim() || loading) return
     try {
@@ -326,7 +373,6 @@ Output clean markdown only.`,
   }
 
   // ── Save ────────────────────────────────────────────────────────────────────
-
   const handleSaveNote = () => {
     if (!editedSummary.trim()) return
     const title = noteTitle.trim() || autoTitle(notes)
@@ -358,6 +404,7 @@ Output clean markdown only.`,
     setIsDirty(false)
     currentNoteIdRef.current = note.id
     setSidebarOpen(false)
+    setUploadedFiles([])
   }
 
   const handleDeleteSavedNote = (id) => {
@@ -375,7 +422,6 @@ Output clean markdown only.`,
   }
 
   // ── Copy & PDF export ───────────────────────────────────────────────────────
-
   const handleCopySummary = async () => {
     if (!richSummaryRef.current) return
     const clone = richSummaryRef.current.cloneNode(true)
@@ -421,7 +467,6 @@ Output clean markdown only.`,
   }
 
   // ── Voice ───────────────────────────────────────────────────────────────────
-
   const handleToggleRecording = () => {
     if (isRecording) { recognitionRef.current?.stop(); setIsRecording(false); return }
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition
@@ -443,7 +488,6 @@ Output clean markdown only.`,
   }
 
   // ── Style examples ──────────────────────────────────────────────────────────
-
   const readTextFile = (file) =>
     new Promise((resolve, reject) => {
       const reader = new FileReader()
@@ -476,13 +520,13 @@ Output clean markdown only.`,
   useEffect(() => { localStorage.setItem(preferencesKey, JSON.stringify(preferences)) }, [preferences])
 
   // ── Render ──────────────────────────────────────────────────────────────────
-
   return (
     <main className="app-shell">
       <header className="topbar">
         <div className="topbar-inner">
           <h1 className="logo">NoteFlow</h1>
           <div className="topbar-actions">
+            <button type="button" onClick={handleNewNote} className="btn btn-ghost">+ New</button>
             <button type="button" onClick={() => setPreferencesOpen(true)} className="btn btn-ghost">Preferences</button>
             <button type="button" onClick={() => setSidebarOpen((o) => !o)} className="btn btn-ghost">Notes</button>
           </div>
@@ -525,7 +569,17 @@ Output clean markdown only.`,
 
         {/* LEFT — notes + file upload */}
         <div className="panel notes-panel">
-          <label htmlFor="notes" className="section-label">Your Notes</label>
+          <div className="panel-label-row">
+            <label htmlFor="notes" className="section-label">Your Notes</label>
+            {/* Word counter */}
+            {notes.trim() && (
+              <span className={`word-counter ${isLong ? 'is-long' : ''}`}>
+                {wordCount} words · {charCount} chars
+                {isLong && <span className="counter-warning"> · ⚠ long</span>}
+              </span>
+            )}
+          </div>
+
           <div
             className="pdf-dropzone"
             onDragOver={(e) => e.preventDefault()}
@@ -559,7 +613,7 @@ Output clean markdown only.`,
             className="notes-input"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Type or paste notes here, or drop a PDF / PowerPoint above... (Cmd+Enter to summarize)"
+            placeholder="Type or paste notes here, or drop a PDF / PowerPoint above...&#10;&#10;Cmd+Enter to summarize"
           />
           <div className="panel-actions">
             <button type="button" disabled={loading} onClick={handleSummarize} className="btn btn-summarize">Summarize</button>
@@ -570,7 +624,7 @@ Output clean markdown only.`,
           </div>
         </div>
 
-        {/* RIGHT — rendered summary with ReactMarkdown */}
+        {/* RIGHT — rendered summary */}
         <div className="panel summary-panel">
           <div className="summary-header-row">
             <input
@@ -581,6 +635,7 @@ Output clean markdown only.`,
             />
             {editedSummary ? (
               <div className="summary-toolbar">
+                {autoSaveLabel && <span className="autosave-label">{autoSaveLabel}</span>}
                 <button type="button" onClick={handleCopySummary} className={`btn btn-subtle btn-small ${copied ? 'is-copied' : ''}`}>
                   {copied ? 'Copied ✓' : 'Copy'}
                 </button>
@@ -616,7 +671,21 @@ Output clean markdown only.`,
                 {editedSummary}
               </ReactMarkdown>
             ) : (
-              <p className="muted-copy">Your generated summary will appear here.</p>
+              /* Better empty state */
+              <div className="empty-state">
+                <div className="empty-state-icon">✦</div>
+                <p className="empty-state-title">Ready when you are</p>
+                <p className="empty-state-body">
+                  Paste your notes or upload a PDF / PowerPoint on the left,<br />
+                  then hit <kbd>Summarize</kbd> or press <kbd>⌘ Enter</kbd>.
+                </p>
+                <div className="empty-state-hints">
+                  <span>📄 PDF upload</span>
+                  <span>📊 PowerPoint</span>
+                  <span>🎤 Voice dictation</span>
+                  <span>🌍 7 languages</span>
+                </div>
+              </div>
             )}
           </div>
         </div>
