@@ -16,17 +16,14 @@ function App() {
     language: 'English',
     styleExamples: [],
   }
-
   const noteTypes = [
     'Lecture notes', 'Meeting notes', 'Research notes',
     'Book notes', 'Interview notes', 'Personal notes',
   ]
-
   const summaryLengths = ['Brief', 'Balanced', 'Detailed']
   const languages = ['English', 'Spanish', 'French', 'German', 'Dutch', 'Italian', 'Portuguese']
 
   const [notes, setNotes] = useState('')
-  const [summary, setSummary] = useState('')
   const [editedSummary, setEditedSummary] = useState('')
   const [noteTitle, setNoteTitle] = useState('')
   const [isDirty, setIsDirty] = useState(false)
@@ -41,6 +38,7 @@ function App() {
   const [renamingId, setRenamingId] = useState(null)
   const [renameValue, setRenameValue] = useState('')
   const [uploadedFiles, setUploadedFiles] = useState([])
+  const [editMode, setEditMode] = useState(false)
 
   const recognitionRef = useRef(null)
   const richSummaryRef = useRef(null)
@@ -64,7 +62,6 @@ function App() {
   })
 
   const wordCount = notes.trim() ? notes.trim().split(/\s+/).length : 0
-  const charCount = notes.length
   const isLong = wordCount > 800
 
   const autoTitle = (text) =>
@@ -118,11 +115,11 @@ function App() {
       if (!window.confirm('You have unsaved changes. Start a new note anyway?')) return
     }
     setNotes('')
-    setSummary('')
     setEditedSummary('')
     setNoteTitle('')
     setIsDirty(false)
     setUploadedFiles([])
+    setEditMode(false)
     currentNoteIdRef.current = null
     setSaveLabel('Save')
   }
@@ -233,24 +230,27 @@ function App() {
     if (!notes.trim() || loading) return
     try {
       setLoading(true)
-      setSummary(''); setEditedSummary(''); setIsDirty(false)
+      setEditedSummary('')
+      setIsDirty(false)
+      setEditMode(false)
       setNoteTitle(autoTitle(notes))
       currentNoteIdRef.current = null
 
-      const subjectInstructions = {
-        General: 'Use whatever structure best fits the content.',
-        'Science & Maths': 'Highlight formulas, constants, derivations, and step-by-step reasoning.',
-        'History & Humanities': 'Highlight dates, key figures, causes, and consequences.',
-        Law: 'Highlight cases, statutes, legal tests, and precedents.',
-        Literature: 'Highlight themes, characters, quotes, and literary techniques.',
-        'Computer Science': 'Highlight algorithms, complexity, and code concepts.',
-        'Economics & Business': 'Highlight models, graphs, key theorems, and real-world examples.',
-      }
       const lengthInstructions = {
         Brief: 'Bullet points only, no elaboration, very concise.',
-        Balanced: 'Current default behaviour with concise but useful detail.',
+        Balanced: 'Concise but useful detail.',
         Detailed: 'Include explanations, examples, and context for each point.',
       }
+
+      const noteTypeInstructions = {
+        'Lecture notes': 'Structure as a study guide with key concepts, definitions, and important details.',
+        'Meeting notes': 'Structure with attendees context (if present), decisions made, action items, and key discussion points.',
+        'Research notes': 'Structure with research question, findings, methodology notes, and open questions.',
+        'Book notes': 'Structure with main arguments, key ideas per chapter/section, memorable quotes, and personal takeaways.',
+        'Interview notes': 'Structure with key quotes, themes that emerged, and notable insights from the subject.',
+        'Personal notes': 'Structure naturally based on the content — no rigid format.',
+      }
+
       const styleExamplesSection = preferences.styleExamples.length > 0
         ? `\nThe student has provided examples of summaries they like. Match that style closely.\n\nExamples:\n---\n${preferences.styleExamples.map((e) => e.text).join('\n---\n')}\n---\n`
         : ''
@@ -267,11 +267,10 @@ function App() {
           model: 'claude-haiku-4-5-20251001',
           max_tokens: 1024,
           stream: true,
-          system: `You are a study assistant. Transform raw lecture notes into a clean study guide.
+          system: `You are a study assistant. Transform raw notes into a clean, structured summary.
 
 Rules:
 - Read the notes first and decide what structure makes sense for THIS content
-- Use whatever sections and format best fits the material
 - Be concise — no waffle, no encouragement, no filler phrases
 - Include formulas, distinctions, and examples where relevant
 - If the notes mention something without explaining it, flag it at the end
@@ -280,10 +279,10 @@ Rules:
 - Consolidate repeated concepts into one place
 - Infer meaning from messy or unclear notes
 - Never say "the notes mention..." or "you wrote..." — present content as fact
-- If the notes contain text from uploaded files (marked with "--- Uploaded: filename ---"), treat it as source material and integrate it naturally. For PowerPoint slides marked [Slide N], treat each as a separate topic or section.
+- If the notes contain text from uploaded files (marked "--- Uploaded: filename ---"), integrate it naturally. For PowerPoint slides marked [Slide N], treat each as a separate topic.
 
 Preferences:
-- Note type: ${preferences.noteType} — structure and tone should match this format
+- Note type: ${preferences.noteType} — ${noteTypeInstructions[preferences.noteType] || 'structure appropriately'}
 - Subject: ${preferences.subjectMode || 'not specified'} — tailor terminology and structure to this subject if provided
 - Summary length: ${preferences.summaryLength} — ${lengthInstructions[preferences.summaryLength]}
 - Language: ${preferences.language} — write the entire summary in ${preferences.language}
@@ -317,17 +316,15 @@ Output clean markdown only.`,
             if (dt) {
               if (!receivedFirstChunk) { setLoading(false); receivedFirstChunk = true }
               accumulated += dt
-              setSummary(accumulated)
               setEditedSummary(accumulated)
             }
           }
           if (done) break
         }
       }
-      if (!receivedFirstChunk) { setSummary('No summary returned.'); setEditedSummary('No summary returned.') }
+      if (!receivedFirstChunk) setEditedSummary('No summary returned.')
       setIsDirty(true)
     } catch (error) {
-      setSummary(`Unable to generate summary. ${error.message}`)
       setEditedSummary(`Unable to generate summary. ${error.message}`)
     } finally {
       setLoading(false)
@@ -355,10 +352,14 @@ Output clean markdown only.`,
   }
 
   const handleLoadSavedNote = (note) => {
-    setNotes(note.notes); setSummary(note.summary); setEditedSummary(note.summary)
-    setNoteTitle(note.title); setIsDirty(false)
+    setNotes(note.notes)
+    setEditedSummary(note.summary)
+    setNoteTitle(note.title)
+    setIsDirty(false)
+    setEditMode(false)
     currentNoteIdRef.current = note.id
-    setSidebarOpen(false); setUploadedFiles([])
+    setSidebarOpen(false)
+    setUploadedFiles([])
   }
 
   const handleDeleteSavedNote = (id) => {
@@ -463,6 +464,7 @@ Output clean markdown only.`,
         </div>
       </header>
 
+      {/* Sidebar */}
       <aside className={`saved-sidebar ${sidebarOpen ? 'is-open' : ''}`}>
         <h3 className="sidebar-title">Saved Notes</h3>
         {savedNotes.length === 0 ? (
@@ -471,8 +473,10 @@ Output clean markdown only.`,
           <div key={note.id} className="saved-note-card">
             {renamingId === note.id ? (
               <div className="rename-row">
-                <input className="rename-input" value={renameValue} onChange={(e) => setRenameValue(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === 'Enter') handleRenameNote(note.id); if (e.key === 'Escape') setRenamingId(null) }} autoFocus />
+                <input className="rename-input" value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') handleRenameNote(note.id); if (e.key === 'Escape') setRenamingId(null) }}
+                  autoFocus />
                 <button type="button" className="btn btn-subtle btn-small" onClick={() => handleRenameNote(note.id)}>Done</button>
               </div>
             ) : (
@@ -482,15 +486,16 @@ Output clean markdown only.`,
               </button>
             )}
             <div className="note-card-actions">
-              <button type="button" className="icon-btn" title="Rename" onClick={() => { setRenamingId(note.id); setRenameValue(note.title) }}>Rename</button>
-              <button type="button" className="icon-btn icon-btn-delete" title="Delete" onClick={() => handleDeleteSavedNote(note.id)}>Delete</button>
+              <button type="button" className="icon-btn" onClick={() => { setRenamingId(note.id); setRenameValue(note.title) }}>Rename</button>
+              <button type="button" className="icon-btn icon-btn-delete" onClick={() => handleDeleteSavedNote(note.id)}>Delete</button>
             </div>
           </div>
         ))}
       </aside>
 
       <section className="workspace-card">
-        {/* LEFT */}
+
+        {/* LEFT — notes */}
         <div className="panel notes-panel">
           <div className="panel-label-row">
             <label htmlFor="notes" className="section-label">Notes</label>
@@ -536,14 +541,28 @@ Output clean markdown only.`,
           </div>
         </div>
 
-        {/* RIGHT */}
+        {/* RIGHT — summary */}
         <div className="panel summary-panel">
           <div className="summary-header-row">
-            <input className="note-title-input" value={noteTitle} onChange={(e) => { setNoteTitle(e.target.value); setIsDirty(true) }} placeholder="Untitled note" />
+            <input
+              className="note-title-input"
+              value={noteTitle}
+              onChange={(e) => { setNoteTitle(e.target.value); setIsDirty(true) }}
+              placeholder="Untitled note"
+            />
             {editedSummary && (
               <div className="summary-toolbar">
                 {autoSaveLabel && <span className="autosave-label">{autoSaveLabel}</span>}
-                <button type="button" onClick={handleCopySummary} className={`btn btn-subtle btn-small ${copied ? 'is-copied' : ''}`}>{copied ? 'Copied' : 'Copy'}</button>
+                <button
+                  type="button"
+                  onClick={() => setEditMode((m) => !m)}
+                  className={`btn btn-subtle btn-small ${editMode ? 'is-active-mode' : ''}`}
+                >
+                  {editMode ? 'Done editing' : 'Edit'}
+                </button>
+                <button type="button" onClick={handleCopySummary} className={`btn btn-subtle btn-small ${copied ? 'is-copied' : ''}`}>
+                  {copied ? 'Copied' : 'Copy'}
+                </button>
                 <button type="button" onClick={handleDownloadPdf} className="btn btn-subtle btn-small">Export PDF</button>
                 <button type="button" onClick={handleSaveNote} className={`btn btn-subtle btn-small save-btn ${isDirty ? 'is-dirty' : ''}`}>
                   {isDirty && <span className="dirty-dot" />}{saveLabel}
@@ -559,16 +578,26 @@ Output clean markdown only.`,
                 <div className="shimmer-line" /><div className="shimmer-line medium" /><div className="shimmer-line" />
               </div>
             ) : editedSummary ? (
-              <ReactMarkdown
-                className="markdown-content"
-                remarkPlugins={[remarkGfm, remarkMath]}
-                rehypePlugins={[rehypeKatex]}
-                components={{
-                  table: ({ ...props }) => <table style={{ width: '100%', borderCollapse: 'collapse', margin: '12px 0' }} {...props} />,
-                  th: ({ ...props }) => <th style={{ border: '1px solid #d1d5db', padding: '8px', textAlign: 'left', backgroundColor: '#f9fafb' }} {...props} />,
-                  td: ({ ...props }) => <td style={{ border: '1px solid #d1d5db', padding: '8px' }} {...props} />,
-                }}
-              >{editedSummary}</ReactMarkdown>
+              editMode ? (
+                <textarea
+                  className="summary-edit-area"
+                  value={editedSummary}
+                  onChange={(e) => { setEditedSummary(e.target.value); setIsDirty(true) }}
+                  spellCheck={false}
+                  autoFocus
+                />
+              ) : (
+                <ReactMarkdown
+                  className="markdown-content"
+                  remarkPlugins={[remarkGfm, remarkMath]}
+                  rehypePlugins={[rehypeKatex]}
+                  components={{
+                    table: ({ ...props }) => <table style={{ width: '100%', borderCollapse: 'collapse', margin: '12px 0' }} {...props} />,
+                    th: ({ ...props }) => <th style={{ border: '1px solid #d1d5db', padding: '8px', textAlign: 'left', backgroundColor: '#f9fafb' }} {...props} />,
+                    td: ({ ...props }) => <td style={{ border: '1px solid #d1d5db', padding: '8px' }} {...props} />,
+                  }}
+                >{editedSummary}</ReactMarkdown>
+              )
             ) : (
               <div className="empty-state">
                 <p className="empty-state-title">Your summary will appear here</p>
@@ -588,6 +617,7 @@ Output clean markdown only.`,
         </div>
       </section>
 
+      {/* Preferences modal */}
       {preferencesOpen && (
         <div className="modal-backdrop">
           <div className="preferences-modal">
@@ -595,39 +625,50 @@ Output clean markdown only.`,
               <h3>Preferences</h3>
               <button type="button" className="btn btn-subtle btn-small" onClick={() => setPreferencesOpen(false)}>Close</button>
             </div>
-              <div className="pref-section">
-                <p className="section-label">Subject</p>
-                <p className="pref-description">Enter your subject or topic so the AI structures the summary accordingly.</p>
-                <input
-                  type="text"
-                  className="pref-text-input"
-                  value={preferences.subjectMode}
-                  onChange={(e) => setPreferences((p) => ({ ...p, subjectMode: e.target.value }))}
-                  placeholder="e.g. Thermodynamics, Contract Law, Macroeconomics..."
-                />
+
+            <div className="pref-section">
+              <p className="section-label">Note Type</p>
+              <div className="pill-group">
+                {noteTypes.map((type) => (
+                  <button key={type} type="button"
+                    className={`btn btn-pill ${preferences.noteType === type ? 'is-active' : ''}`}
+                    onClick={() => setPreferences((p) => ({ ...p, noteType: type }))}
+                  >{type}</button>
+                ))}
               </div>
-              <div className="pref-section">
-                <p className="section-label">Note Type</p>
-                <div className="pill-group">
-                  {noteTypes.map((type) => (
-                    <button key={type} type="button" className={`btn btn-pill ${preferences.noteType === type ? 'is-active' : ''}`} onClick={() => setPreferences((p) => ({ ...p, noteType: type }))}>{type}</button>
-                  ))}
-                </div>
-              </div>
+            </div>
+
+            <div className="pref-section">
+              <p className="section-label">Subject</p>
+              <p className="pref-description">Enter your subject so the AI structures the summary accordingly.</p>
+              <input
+                type="text"
+                className="pref-text-input"
+                value={preferences.subjectMode}
+                onChange={(e) => setPreferences((p) => ({ ...p, subjectMode: e.target.value }))}
+                placeholder="e.g. Thermodynamics, Contract Law, Macroeconomics..."
+              />
+            </div>
+
             <div className="pref-section">
               <p className="section-label">Summary Length</p>
               <div className="pill-group">
                 {summaryLengths.map((l) => (
-                  <button key={l} type="button" className={`btn btn-pill ${preferences.summaryLength === l ? 'is-active' : ''}`} onClick={() => setPreferences((p) => ({ ...p, summaryLength: l }))}>{l}</button>
+                  <button key={l} type="button"
+                    className={`btn btn-pill ${preferences.summaryLength === l ? 'is-active' : ''}`}
+                    onClick={() => setPreferences((p) => ({ ...p, summaryLength: l }))}
+                  >{l}</button>
                 ))}
               </div>
             </div>
+
             <div className="pref-section">
               <p className="section-label">Language</p>
               <select value={preferences.language} onChange={(e) => setPreferences((p) => ({ ...p, language: e.target.value }))} className="language-select">
                 {languages.map((l) => <option key={l} value={l}>{l}</option>)}
               </select>
             </div>
+
             <div className="pref-section">
               <p className="section-label">Style Examples</p>
               <p className="pref-description">Upload up to 3 example summaries. The AI will match their style.</p>
@@ -648,6 +689,7 @@ Output clean markdown only.`,
         </div>
       )}
 
+      {/* Hidden ref for copy/PDF */}
       <div ref={richSummaryRef} style={{ position: 'fixed', left: '-9999px', top: 0, width: 800, backgroundColor: '#fff', color: '#000', padding: 32 }} aria-hidden="true">
         <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{editedSummary}</ReactMarkdown>
       </div>
