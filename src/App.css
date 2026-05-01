@@ -380,3 +380,66 @@
   .btn { padding: 6px 11px; }
   .note-card-actions { opacity: 1; }
 }
+
+/* Fix text alignment */
+.markdown-content, .tiptap-body { text-align: left; }
+
+/* Tables in view mode */
+.markdown-content table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+.markdown-content th { border: 1px solid #d1d5db; padding: 8px; text-align: left; background: #f9fafb; font-weight: 600; }
+.markdown-content td { border: 1px solid #d1d5db; padding: 8px; }
+.markdown-content tr:nth-child(even) td { background: #fafafa; }
+
+/* Tables in edit mode (Tiptap) */
+.tiptap-body table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+.tiptap-body th { border: 1px solid #d1d5db; padding: 8px; text-align: left; background: #f9fafb; font-weight: 600; }
+.tiptap-body td { border: 1px solid #d1d5db; padding: 8px; }
+.tiptap-body .selectedCell { background: #eff6ff; }
+
+/* ── Extended toolbar ── */
+.editor-toolbar-wrap { margin-bottom: 12px; }
+.editor-toolbar { display: flex; align-items: center; gap: 2px; padding: 6px 0 8px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.link-input-row { display: flex; align-items: center; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.link-input { flex: 1; font-size: 13px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; outline: none; font-family: inherit; }
+.link-input:focus { border-color: var(--accent); }
+
+/* ── Tiptap content styles ── */
+.tiptap-body { text-align: left; outline: none; min-height: 200px; font-size: 15px; line-height: 1.75; color: var(--text); font-family: 'DM Sans', sans-serif; }
+.tiptap-body h1 { font-size: 1.4em; font-weight: 700; margin: 0.8em 0 0.3em; }
+.tiptap-body h2 { font-size: 1.15em; font-weight: 700; margin: 0.8em 0 0.3em; }
+.tiptap-body h3 { font-size: 1em; font-weight: 700; margin: 0.7em 0 0.2em; }
+.tiptap-body p { margin: 0 0 0.6em; }
+.tiptap-body ul, .tiptap-body ol { padding-left: 1.4rem; margin: 0 0 0.6em; }
+.tiptap-body li { margin-bottom: 3px; }
+.tiptap-body strong { font-weight: 600; }
+.tiptap-body em { font-style: italic; }
+.tiptap-body u { text-decoration: underline; }
+.tiptap-body s { text-decoration: line-through; }
+.tiptap-body sub { font-size: 0.75em; vertical-align: sub; }
+.tiptap-body sup { font-size: 0.75em; vertical-align: super; }
+.tiptap-body mark { border-radius: 2px; padding: 0 2px; }
+.tiptap-body blockquote { border-left: 3px solid var(--border); margin: 0 0 0.7em; padding-left: 14px; color: var(--text-secondary); font-style: italic; }
+.tiptap-body hr { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+.tiptap-body code { background: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-size: 13px; font-family: monospace; }
+.tiptap-body table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+.tiptap-body th { border: 1px solid #d1d5db; padding: 8px; text-align: left; background: #f9fafb; font-weight: 600; }
+.tiptap-body td { border: 1px solid #d1d5db; padding: 8px; }
+.tiptap-body .selectedCell { background: #eff6ff; }
+.tiptap-link { color: var(--accent); text-decoration: underline; cursor: pointer; }
+
+/* ── Markdown view content ── */
+.markdown-content { text-align: left; font-size: 15px; line-height: 1.75; color: var(--text); }
+.markdown-content h1 { font-size: 1.4em; font-weight: 700; margin: 0.8em 0 0.3em; }
+.markdown-content h2 { font-size: 1.15em; font-weight: 700; margin: 0.8em 0 0.3em; }
+.markdown-content h3 { font-size: 1em; font-weight: 700; margin: 0.7em 0 0.2em; }
+.markdown-content p { margin: 0 0 0.7em; }
+.markdown-content ul, .markdown-content ol { padding-left: 1.3rem; margin: 0 0 0.7em; }
+.markdown-content li { margin-bottom: 3px; }
+.markdown-content strong { font-weight: 600; }
+.markdown-content mark { background: #fef08a; border-radius: 2px; padding: 0 2px; }
+.markdown-content u { text-decoration: underline; }
+.markdown-content blockquote { border-left: 3px solid var(--border); margin: 0 0 0.7em; padding-left: 14px; color: var(--text-secondary); font-style: italic; }
+.markdown-content table { width: 100%; border-collapse: collapse; margin: 12px 0; }
+.markdown-content th { border: 1px solid #d1d5db; padding: 8px; text-align: left; background: #f9fafb; font-weight: 600; }
+.markdown-content td { border: 1px solid #d1d5db; padding: 8px; }
+.markdown-content a { color: var(--accent); text-decoration: underline; }
