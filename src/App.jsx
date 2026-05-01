@@ -748,12 +748,14 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
 
           {/* Content */}
           <div className={`summary-surface ${hasSummary ? 'has-content' : ''} ${editMode ? 'is-editing' : ''}`}>
-            {loading ? (
-              <div className="shimmer-wrap">
-                <div className="shimmer-line" /><div className="shimmer-line short" />
-                <div className="shimmer-line" /><div className="shimmer-line medium" /><div className="shimmer-line" />
-              </div>
-            ) : hasSummary ? (
+          {loading && !streamBuffer ? (
+            <div className="shimmer-wrap">
+              <div className="shimmer-line" /><div className="shimmer-line short" />
+              <div className="shimmer-line" /><div className="shimmer-line medium" /><div className="shimmer-line" />
+            </div>
+          ) : (loading || streaming) && streamBuffer ? (
+            <ReactMarkdown className="markdown-content streaming" remarkPlugins={[remarkGfm]}>{streamBuffer}</ReactMarkdown>
+          ) : hasSummary ? (
               editMode ? (
                 <EditorContent editor={editor} />
               ) : (
