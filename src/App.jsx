@@ -1,80 +1,10 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
-import { useEditor, EditorContent } from '@tiptap/react'
-import StarterKit from '@tiptap/starter-kit'
+import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import 'katex/dist/katex.min.css'
 import './App.css'
-
-// ── Markdown → HTML converter ────────────────────────────────────────────────
-// Converts the AI's markdown output into HTML for Tiptap to render
-
-const formatInline = (text) =>
-  text
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-
-const markdownToHtml = (md) => {
-  if (!md) return ''
-  const lines = md.split('\n')
-  let html = ''
-  let inUl = false
-  let inOl = false
-  let olIndex = 0
-
-  const closeList = () => {
-    if (inUl) { html += '</ul>'; inUl = false }
-    if (inOl) { html += '</ol>'; inOl = false; olIndex = 0 }
-  }
-
-  for (const line of lines) {
-    if (line.startsWith('# ')) {
-      closeList()
-      html += `<h1>${formatInline(line.slice(2))}</h1>`
-    } else if (line.startsWith('## ')) {
-      closeList()
-      html += `<h2>${formatInline(line.slice(3))}</h2>`
-    } else if (line.startsWith('### ')) {
-      closeList()
-      html += `<h3>${formatInline(line.slice(4))}</h3>`
-    } else if (/^[-*] /.test(line)) {
-      if (inOl) closeList()
-      if (!inUl) { html += '<ul>'; inUl = true }
-      html += `<li><p>${formatInline(line.slice(2))}</p></li>`
-    } else if (/^\d+\. /.test(line)) {
-      if (inUl) closeList()
-      if (!inOl) { html += '<ol>'; inOl = true }
-      html += `<li><p>${formatInline(line.replace(/^\d+\. /, ''))}</p></li>`
-    } else if (line.trim() === '' || line.trim() === '---') {
-      closeList()
-    } else {
-      closeList()
-      html += `<p>${formatInline(line)}</p>`
-    }
-  }
-  closeList()
-  return html
-}
-
-// ── Toolbar button ────────────────────────────────────────────────────────────
-
-function ToolbarBtn({ onClick, active, title, children }) {
-  return (
-    <button
-      type="button"
-      title={title}
-      onMouseDown={(e) => { e.preventDefault(); onClick() }}
-      className={`toolbar-btn ${active ? 'is-active' : ''}`}
-    >
-      {children}
-    </button>
-  )
-}
-
-// ── Main App ──────────────────────────────────────────────────────────────────
 
 function App() {
   const storageKey = 'saved-study-notes'
@@ -93,12 +23,12 @@ function App() {
   const languages = ['English', 'Spanish', 'French', 'German', 'Dutch', 'Italian', 'Portuguese']
 
   const [notes, setNotes] = useState('')
-  const [summaryMarkdown, setSummaryMarkdown] = useState('')
+  const [summary, setSummary] = useState('')
+  const [editedSummary, setEditedSummary] = useState('')
   const [noteTitle, setNoteTitle] = useState('')
   const [isDirty, setIsDirty] = useState(false)
   const [saveLabel, setSaveLabel] = useState('Save Note')
   const [loading, setLoading] = useState(false)
-  const [streaming, setStreaming] = useState(false)
   const [fileLoading, setFileLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
@@ -109,10 +39,10 @@ function App() {
   const [uploadedFiles, setUploadedFiles] = useState([])
 
   const recognitionRef = useRef(null)
+  const richSummaryRef = useRef(null)
   const examplesInputRef = useRef(null)
   const fileInputRef = useRef(null)
   const currentNoteIdRef = useRef(null)
-  const editorContainerRef = useRef(null)
 
   const [preferences, setPreferences] = useState(() => {
     try {
@@ -128,33 +58,12 @@ function App() {
     } catch { return [] }
   })
 
-  // ── Tiptap editor ────────────────────────────────────────────────────────────
-
-  const editor = useEditor({
-    extensions: [StarterKit],
-    content: '',
-    editorProps: {
-      attributes: { class: 'tiptap-editor' },
-    },
-    onUpdate: () => setIsDirty(true),
-  })
-
-  // When streaming finishes, convert markdown → HTML and load into Tiptap
-  useEffect(() => {
-    if (!streaming && summaryMarkdown && editor) {
-      const html = markdownToHtml(summaryMarkdown)
-      editor.commands.setContent(html)
-      setIsDirty(true)
-    }
-  }, [streaming, summaryMarkdown, editor])
-
-  // ── Keyboard shortcuts ───────────────────────────────────────────────────────
-
+  // Cmd+S / Ctrl+S to save
   useEffect(() => {
     const handleKeyDown = (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 's') {
         e.preventDefault()
-        if (editor && !editor.isEmpty) handleSaveNote()
+        if (editedSummary.trim()) handleSaveNote()
       }
       // Cmd+Enter to summarize
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
@@ -164,12 +73,12 @@ function App() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [notes, loading, editor, noteTitle])
+  }, [editedSummary, notes, noteTitle, loading])
 
   const autoTitle = (text) =>
     text.trim().split(/\s+/).slice(0, 6).join(' ') || 'Untitled Note'
 
-  // ── PDF.js ────────────────────────────────────────────────────────────────────
+  // ── PDF.js ───────────────────────────────────────────────────────────────────
 
   const loadPdfJs = () =>
     new Promise((resolve, reject) => {
@@ -204,7 +113,7 @@ function App() {
     return pages.join('\n\n')
   }
 
-  // ── JSZip / PPTX ──────────────────────────────────────────────────────────────
+  // ── JSZip / PPTX ─────────────────────────────────────────────────────────────
 
   const loadJSZip = () =>
     new Promise((resolve, reject) => {
@@ -295,18 +204,17 @@ function App() {
     await appendFileToNotes(files)
   }
 
-  // ── Summarize ─────────────────────────────────────────────────────────────────
+  // ── Summarize ───────────────────────────────────────────────────────────────
 
   const handleSummarize = async () => {
     if (!notes.trim() || loading) return
     try {
       setLoading(true)
-      setStreaming(true)
-      setSummaryMarkdown('')
+      setSummary('')
+      setEditedSummary('')
       setIsDirty(false)
       setNoteTitle(autoTitle(notes))
       currentNoteIdRef.current = null
-      if (editor) editor.commands.clearContent()
 
       const subjectInstructions = {
         General: 'Use whatever structure best fits the content.',
@@ -396,37 +304,41 @@ Output clean markdown only.`,
             if (deltaText) {
               if (!receivedFirstChunk) { setLoading(false); receivedFirstChunk = true }
               accumulated += deltaText
-              setSummaryMarkdown(accumulated)
+              setSummary(accumulated)
+              setEditedSummary(accumulated)
             }
           }
           if (done) break
         }
       }
 
-      if (!receivedFirstChunk) setSummaryMarkdown('No summary returned by the API.')
+      if (!receivedFirstChunk) {
+        setSummary('No summary returned by the API.')
+        setEditedSummary('No summary returned by the API.')
+      }
+      setIsDirty(true)
     } catch (error) {
-      setSummaryMarkdown(`Unable to generate summary. ${error.message}`)
+      setSummary(`Unable to generate summary. ${error.message}`)
+      setEditedSummary(`Unable to generate summary. ${error.message}`)
     } finally {
       setLoading(false)
-      setStreaming(false)
     }
   }
 
-  // ── Save ──────────────────────────────────────────────────────────────────────
+  // ── Save ────────────────────────────────────────────────────────────────────
 
   const handleSaveNote = () => {
-    if (!editor || editor.isEmpty) return
-    const html = editor.getHTML()
+    if (!editedSummary.trim()) return
     const title = noteTitle.trim() || autoTitle(notes)
     const updatedNotes = [...savedNotes]
 
     if (currentNoteIdRef.current) {
       const idx = updatedNotes.findIndex((n) => n.id === currentNoteIdRef.current)
       if (idx !== -1) {
-        updatedNotes[idx] = { ...updatedNotes[idx], title, notes, summary: html, summaryMarkdown, timestamp: new Date().toISOString() }
+        updatedNotes[idx] = { ...updatedNotes[idx], title, notes, summary: editedSummary, timestamp: new Date().toISOString() }
       }
     } else {
-      const newNote = { id: Date.now().toString(), title, notes, summary: html, summaryMarkdown, timestamp: new Date().toISOString() }
+      const newNote = { id: Date.now().toString(), title, notes, summary: editedSummary, timestamp: new Date().toISOString() }
       currentNoteIdRef.current = newNote.id
       updatedNotes.unshift(newNote)
     }
@@ -440,20 +352,12 @@ Output clean markdown only.`,
 
   const handleLoadSavedNote = (note) => {
     setNotes(note.notes)
+    setSummary(note.summary)
+    setEditedSummary(note.summary)
     setNoteTitle(note.title)
     setIsDirty(false)
     currentNoteIdRef.current = note.id
     setSidebarOpen(false)
-    if (editor) {
-      // Load HTML if available, otherwise convert markdown
-      if (note.summary && note.summary.startsWith('<')) {
-        editor.commands.setContent(note.summary)
-      } else if (note.summaryMarkdown) {
-        editor.commands.setContent(markdownToHtml(note.summaryMarkdown))
-      } else if (note.summary) {
-        editor.commands.setContent(markdownToHtml(note.summary))
-      }
-    }
   }
 
   const handleDeleteSavedNote = (id) => {
@@ -470,12 +374,16 @@ Output clean markdown only.`,
     setRenamingId(null)
   }
 
-  // ── Copy & PDF ────────────────────────────────────────────────────────────────
+  // ── Copy & PDF export ───────────────────────────────────────────────────────
 
   const handleCopySummary = async () => {
-    if (!editor) return
-    const html = editor.getHTML()
-    const plainText = editor.getText()
+    if (!richSummaryRef.current) return
+    const clone = richSummaryRef.current.cloneNode(true)
+    clone.querySelectorAll('table').forEach((t) => { t.style.borderCollapse = 'collapse'; t.style.width = '100%' })
+    clone.querySelectorAll('th').forEach((th) => { th.style.border = '1px solid black'; th.style.padding = '6px 12px'; th.style.backgroundColor = '#f3f4f6'; th.style.textAlign = 'left' })
+    clone.querySelectorAll('td').forEach((td) => { td.style.border = '1px solid black'; td.style.padding = '6px 12px' })
+    const html = clone.innerHTML
+    const plainText = richSummaryRef.current.innerText
     try {
       if (window.ClipboardItem && navigator.clipboard?.write) {
         await navigator.clipboard.write([new ClipboardItem({
@@ -503,17 +411,16 @@ Output clean markdown only.`,
   }
 
   const handleDownloadPdf = () => {
-    if (!editor) return
-    const html = editor.getHTML()
+    if (!richSummaryRef.current) return
     const printWindow = window.open('', '_blank', 'width=900,height=1000')
     if (!printWindow) return
-    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>${noteTitle || 'NoteFlow Summary'}</title><style>body{margin:0;padding:40px;background:#fff;color:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.7}h1,h2,h3{margin:.8em 0 .4em;font-weight:700}ul,ol{padding-left:1.4rem}li{margin-bottom:4px}p{margin:0 0 .8em}strong{font-weight:700}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #d1d5db;padding:8px;text-align:left}</style></head><body>${html}</body></html>`)
+    printWindow.document.write(`<!doctype html><html><head><meta charset="utf-8"/><title>${noteTitle || 'NoteFlow Summary'}</title><style>body{margin:0;padding:40px;background:#fff;color:#000;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;line-height:1.6}h1,h2,h3{margin:.8em 0 .4em}ul,ol{padding-left:1.2rem}table{width:100%;border-collapse:collapse;margin:12px 0}th,td{border:1px solid #d1d5db;padding:8px;text-align:left}</style></head><body>${richSummaryRef.current.innerHTML}</body></html>`)
     printWindow.document.close()
     printWindow.focus()
     printWindow.print()
   }
 
-  // ── Voice ─────────────────────────────────────────────────────────────────────
+  // ── Voice ───────────────────────────────────────────────────────────────────
 
   const handleToggleRecording = () => {
     if (isRecording) { recognitionRef.current?.stop(); setIsRecording(false); return }
@@ -535,7 +442,7 @@ Output clean markdown only.`,
     setIsRecording(true)
   }
 
-  // ── Style examples ────────────────────────────────────────────────────────────
+  // ── Style examples ──────────────────────────────────────────────────────────
 
   const readTextFile = (file) =>
     new Promise((resolve, reject) => {
@@ -568,9 +475,7 @@ Output clean markdown only.`,
   useEffect(() => { return () => recognitionRef.current?.stop() }, [])
   useEffect(() => { localStorage.setItem(preferencesKey, JSON.stringify(preferences)) }, [preferences])
 
-  const hasSummary = editor && !editor.isEmpty
-
-  // ── Render ────────────────────────────────────────────────────────────────────
+  // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <main className="app-shell">
@@ -657,9 +562,7 @@ Output clean markdown only.`,
             placeholder="Type or paste notes here, or drop a PDF / PowerPoint above... (Cmd+Enter to summarize)"
           />
           <div className="panel-actions">
-            <button type="button" disabled={loading} onClick={handleSummarize} className="btn btn-summarize">
-              Summarize
-            </button>
+            <button type="button" disabled={loading} onClick={handleSummarize} className="btn btn-summarize">Summarize</button>
             <button type="button" onClick={handleToggleRecording} className={`btn btn-mic ${isRecording ? 'is-recording' : ''}`}>
               {isRecording ? 'Stop Mic' : 'Mic'}
             </button>
@@ -667,7 +570,7 @@ Output clean markdown only.`,
           </div>
         </div>
 
-        {/* RIGHT — rich text summary */}
+        {/* RIGHT — rendered summary with ReactMarkdown */}
         <div className="panel summary-panel">
           <div className="summary-header-row">
             <input
@@ -676,7 +579,7 @@ Output clean markdown only.`,
               onChange={(e) => { setNoteTitle(e.target.value); setIsDirty(true) }}
               placeholder="Note title..."
             />
-            {hasSummary && (
+            {editedSummary ? (
               <div className="summary-toolbar">
                 <button type="button" onClick={handleCopySummary} className={`btn btn-subtle btn-small ${copied ? 'is-copied' : ''}`}>
                   {copied ? 'Copied ✓' : 'Copy'}
@@ -687,27 +590,10 @@ Output clean markdown only.`,
                   {saveLabel}
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
 
-          {/* Formatting toolbar — only shown when there's content */}
-          {hasSummary && !loading && (
-            <div className="editor-toolbar">
-              <ToolbarBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} title="Bold (Cmd+B)"><strong>B</strong></ToolbarBtn>
-              <ToolbarBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} title="Italic (Cmd+I)"><em>I</em></ToolbarBtn>
-              <span className="toolbar-divider" />
-              <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} title="Heading 2">H2</ToolbarBtn>
-              <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} active={editor.isActive('heading', { level: 3 })} title="Heading 3">H3</ToolbarBtn>
-              <span className="toolbar-divider" />
-              <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive('bulletList')} title="Bullet list">• List</ToolbarBtn>
-              <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive('orderedList')} title="Numbered list">1. List</ToolbarBtn>
-              <span className="toolbar-divider" />
-              <ToolbarBtn onClick={() => editor.chain().focus().undo().run()} title="Undo">↩</ToolbarBtn>
-              <ToolbarBtn onClick={() => editor.chain().focus().redo().run()} title="Redo">↪</ToolbarBtn>
-            </div>
-          )}
-
-          <div className={`summary-surface ${hasSummary ? 'has-content' : ''}`}>
+          <div className={`summary-surface ${editedSummary ? 'has-content' : ''}`}>
             {loading ? (
               <div className="shimmer-wrap">
                 <div className="shimmer-line" />
@@ -716,16 +602,21 @@ Output clean markdown only.`,
                 <div className="shimmer-line medium" />
                 <div className="shimmer-line" />
               </div>
+            ) : editedSummary ? (
+              <ReactMarkdown
+                className="markdown-content"
+                remarkPlugins={[remarkGfm, remarkMath]}
+                rehypePlugins={[rehypeKatex]}
+                components={{
+                  table: ({ ...props }) => <table style={{ width: '100%', borderCollapse: 'collapse', margin: '12px 0' }} {...props} />,
+                  th: ({ ...props }) => <th style={{ border: '1px solid #d1d5db', padding: '8px', textAlign: 'left', backgroundColor: '#f9fafb' }} {...props} />,
+                  td: ({ ...props }) => <td style={{ border: '1px solid #d1d5db', padding: '8px' }} {...props} />,
+                }}
+              >
+                {editedSummary}
+              </ReactMarkdown>
             ) : (
-              <>
-                {/* Tiptap editor — always mounted, hidden when empty */}
-                <div style={{ display: hasSummary ? 'block' : 'none', height: '100%' }}>
-                  <EditorContent editor={editor} />
-                </div>
-                {!hasSummary && (
-                  <p className="muted-copy">Your generated summary will appear here.<br />Edit it, format it, then save.</p>
-                )}
-              </>
+              <p className="muted-copy">Your generated summary will appear here.</p>
             )}
           </div>
         </div>
@@ -779,6 +670,15 @@ Output clean markdown only.`,
           </div>
         </div>
       )}
+
+      {/* Hidden rich text ref for copy/PDF export */}
+      <div
+        ref={richSummaryRef}
+        style={{ position: 'fixed', left: '-9999px', top: 0, width: 800, backgroundColor: '#fff', color: '#000', padding: 32 }}
+        aria-hidden="true"
+      >
+        <ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{editedSummary}</ReactMarkdown>
+      </div>
     </main>
   )
 }
