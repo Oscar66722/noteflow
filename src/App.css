@@ -518,3 +518,71 @@
   .preferences-modal { background: var(--bg); }
   .shimmer-line { background: linear-gradient(90deg, #2a2a2a 25%, #333 45%, #2a2a2a 65%); }
 }
+@media (prefers-color-scheme: dark) {
+  /* Tables — override hardcoded inline styles */
+  .markdown-content table,
+  .tiptap-body table { border-color: #3a3a3a !important; }
+
+  .markdown-content th,
+  .tiptap-body th {
+    background: #2a2a2a !important;
+    border-color: #3a3a3a !important;
+    color: var(--text) !important;
+  }
+
+  .markdown-content td,
+  .tiptap-body td {
+    background: #1e1e1e !important;
+    border-color: #3a3a3a !important;
+    color: var(--text) !important;
+  }
+
+  .markdown-content tr:nth-child(even) td {
+    background: #252525 !important;
+  }
+
+  /* Buttons */
+  .btn-subtle {
+    background: #2a2a2a;
+    color: #cccccc;
+    border-color: #3a3a3a;
+  }
+  .btn-subtle:hover { background: #333; color: #f0f0f0; }
+  .btn-ghost { color: #aaaaaa; }
+  .btn-ghost:hover { background: #2a2a2a; color: #f0f0f0; }
+  .btn-pill { background: #2a2a2a; color: #cccccc; border-color: #3a3a3a; }
+  .btn-pill:hover { background: #333; }
+  .btn-pill.is-active { background: #f0f0f0; color: #111; border-color: #f0f0f0; }
+  .btn-summarize { background: #f0f0f0; color: #111; border-color: #f0f0f0; }
+  .btn-summarize:hover { background: #ddd; }
+  .btn-subtle.is-copied { background: #052e16; border-color: #166534; color: #4ade80; }
+  .btn-edit-active { background: #1e3a5f; border-color: #2563eb; color: #93c5fd; }
+
+  /* Upload zone */
+  .pdf-dropzone { border-color: #3a3a3a; }
+  .pdf-dropzone:hover { background: #1e2a3a; border-color: var(--accent); }
+
+  /* Toolbar */
+  .toolbar-btn { color: #aaa; }
+  .toolbar-btn:hover { background: #2a2a2a; color: #f0f0f0; }
+  .toolbar-btn.is-active { background: #f0f0f0; color: #111; }
+  .toolbar-sep { background: #3a3a3a; }
+  .editor-toolbar { border-color: #3a3a3a; }
+  .link-input { background: #2a2a2a; border-color: #3a3a3a; color: #f0f0f0; }
+
+  /* Inputs */
+  .note-title-input { color: var(--text); }
+  .rename-input { background: #2a2a2a; border-color: #3a3a3a; color: #f0f0f0; }
+  .language-select { background: #2a2a2a; border-color: #3a3a3a; color: #f0f0f0; }
+  .pref-text-input { background: #2a2a2a; border-color: #3a3a3a; color: #f0f0f0; }
+
+  /* Pills */
+  .example-pill { background: #2a2a2a; border-color: #3a3a3a; color: #ccc; }
+
+  /* Sidebar cards */
+  .saved-note-card { background: #222; border-color: #333; }
+  .saved-note-card:hover { border-color: #444; }
+
+  /* Modal */
+  .modal-backdrop { background: rgba(0,0,0,0.6); }
+}
