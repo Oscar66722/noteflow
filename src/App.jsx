@@ -125,8 +125,8 @@ function App() {
     const JSZip = await loadJSZip()
     const arrayBuffer = await file.arrayBuffer()
     const zip = await JSZip.loadAsync(arrayBuffer)
-
-    // Find all slide XML files and sort them by slide number
+    
+    // Find all slide XML files sorted by number
     const slideFiles = Object.keys(zip.files)
       .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
       .sort((a, b) => {
@@ -134,21 +134,37 @@ function App() {
         const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10)
         return numA - numB
       })
-
+    
     if (slideFiles.length === 0) throw new Error('No slides found in this PowerPoint file.')
-
-    const slideTexts = []
-    for (let i = 0; i < slideFiles.length; i++) {
-      const xml = await zip.files[slideFiles[i]].async('text')
-      // Extract all <a:t> text nodes (DrawingML text elements)
-      const matches = xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) || []
-      const text = matches
+    
+    const extractText = (xml) =>
+      (xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) || [])
         .map((m) => m.replace(/<[^>]+>/g, '').trim())
         .filter(Boolean)
         .join(' ')
-      if (text.trim()) slideTexts.push(`[Slide ${i + 1}] ${text.trim()}`)
+    
+    const slideTexts = []
+    for (let i = 0; i < slideFiles.length; i++) {
+      const slideNum = i + 1
+    
+        // Extract slide text
+      const slideXml = await zip.files[slideFiles[i]].async('text')
+      const slideText = extractText(slideXml)
+    
+        // Extract speaker notes — stored in ppt/notesSlides/notesSlideN.xml
+      const notesPath = `ppt/notesSlides/notesSlide${slideNum}.xml`
+      let notesText = ''
+      if (zip.files[notesPath]) {
+        const notesXml = await zip.files[notesPath].async('text')
+        notesText = extractText(notesXml)
+      }
+    
+      const parts = []
+      if (slideText.trim()) parts.push(`Slide content: ${slideText.trim()}`)
+      if (notesText.trim()) parts.push(`Speaker notes: ${notesText.trim()}`)
+      if (parts.length) slideTexts.push(`[Slide ${slideNum}]\n${parts.join('\n')}`)
     }
-
+    
     return slideTexts.join('\n\n')
   }
 
