@@ -16,13 +16,8 @@ function App() {
     styleExamples: [],
   }
   const subjectModes = [
-    'General',
-    'Science & Maths',
-    'History & Humanities',
-    'Law',
-    'Literature',
-    'Computer Science',
-    'Economics & Business',
+    'General', 'Science & Maths', 'History & Humanities',
+    'Law', 'Literature', 'Computer Science', 'Economics & Business',
   ]
   const summaryLengths = ['Brief', 'Balanced', 'Detailed']
   const languages = ['English', 'Spanish', 'French', 'German', 'Dutch', 'Italian', 'Portuguese']
@@ -34,7 +29,7 @@ function App() {
   const [isDirty, setIsDirty] = useState(false)
   const [saveLabel, setSaveLabel] = useState('Save Note')
   const [loading, setLoading] = useState(false)
-  const [pdfLoading, setPdfLoading] = useState(false)
+  const [fileLoading, setFileLoading] = useState(false)
   const [copied, setCopied] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -46,25 +41,21 @@ function App() {
   const recognitionRef = useRef(null)
   const richSummaryRef = useRef(null)
   const examplesInputRef = useRef(null)
-  const pdfInputRef = useRef(null)
+  const fileInputRef = useRef(null)
   const currentNoteIdRef = useRef(null)
 
   const [preferences, setPreferences] = useState(() => {
     try {
       const raw = localStorage.getItem(preferencesKey)
       return raw ? { ...defaultPreferences, ...JSON.parse(raw) } : defaultPreferences
-    } catch {
-      return defaultPreferences
-    }
+    } catch { return defaultPreferences }
   })
 
   const [savedNotes, setSavedNotes] = useState(() => {
     try {
       const raw = localStorage.getItem(storageKey)
       return raw ? JSON.parse(raw) : []
-    } catch {
-      return []
-    }
+    } catch { return [] }
   })
 
   // Cmd+S / Ctrl+S to save
@@ -82,7 +73,7 @@ function App() {
   const autoTitle = (text) =>
     text.trim().split(/\s+/).slice(0, 6).join(' ') || 'Untitled Note'
 
-  // ── PDF ─────────────────────────────────────────────────────────────────────
+  // ── PDF.js ───────────────────────────────────────────────────────────────────
 
   const loadPdfJs = () =>
     new Promise((resolve, reject) => {
@@ -117,41 +108,99 @@ function App() {
     return pages.join('\n\n')
   }
 
-  const appendPdfToNotes = async (files) => {
-    setPdfLoading(true)
+  // ── JSZip / PPTX ─────────────────────────────────────────────────────────────
+
+  const loadJSZip = () =>
+    new Promise((resolve, reject) => {
+      if (window.JSZip) { resolve(window.JSZip); return }
+      const script = document.createElement('script')
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'
+      script.async = true
+      script.onload = () => resolve(window.JSZip)
+      script.onerror = () => reject(new Error('Failed to load JSZip'))
+      document.body.appendChild(script)
+    })
+
+  const readPptxFile = async (file) => {
+    const JSZip = await loadJSZip()
+    const arrayBuffer = await file.arrayBuffer()
+    const zip = await JSZip.loadAsync(arrayBuffer)
+
+    // Find all slide XML files and sort them by slide number
+    const slideFiles = Object.keys(zip.files)
+      .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name))
+      .sort((a, b) => {
+        const numA = parseInt(a.match(/\d+/)?.[0] || '0', 10)
+        const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10)
+        return numA - numB
+      })
+
+    if (slideFiles.length === 0) throw new Error('No slides found in this PowerPoint file.')
+
+    const slideTexts = []
+    for (let i = 0; i < slideFiles.length; i++) {
+      const xml = await zip.files[slideFiles[i]].async('text')
+      // Extract all <a:t> text nodes (DrawingML text elements)
+      const matches = xml.match(/<a:t[^>]*>([^<]*)<\/a:t>/g) || []
+      const text = matches
+        .map((m) => m.replace(/<[^>]+>/g, '').trim())
+        .filter(Boolean)
+        .join(' ')
+      if (text.trim()) slideTexts.push(`[Slide ${i + 1}] ${text.trim()}`)
+    }
+
+    return slideTexts.join('\n\n')
+  }
+
+  // ── File upload (PDF + PPTX) ─────────────────────────────────────────────────
+
+  const appendFileToNotes = async (files) => {
+    setFileLoading(true)
     try {
       for (const file of files) {
-        const text = await readPdfFile(file)
+        const name = file.name
+        const lower = name.toLowerCase()
+        let text = ''
+
+        if (lower.endsWith('.pdf')) {
+          text = await readPdfFile(file)
+        } else if (lower.endsWith('.pptx') || lower.endsWith('.ppt')) {
+          text = await readPptxFile(file)
+        }
+
         if (text.trim()) {
           setNotes((prev) =>
             prev.trim()
-              ? `${prev}\n\n--- Uploaded: ${file.name} ---\n\n${text.trim()}`
-              : `--- Uploaded: ${file.name} ---\n\n${text.trim()}`
+              ? `${prev}\n\n--- Uploaded: ${name} ---\n\n${text.trim()}`
+              : `--- Uploaded: ${name} ---\n\n${text.trim()}`
           )
-          setUploadedFiles((prev) => [...prev, file.name])
+          setUploadedFiles((prev) => [...prev, name])
+        } else {
+          alert(`No readable text found in ${name}. The file may be image-based or empty.`)
         }
       }
     } catch (err) {
-      alert(`Could not read PDF: ${err.message}`)
+      alert(`Could not read file: ${err.message}`)
     } finally {
-      setPdfLoading(false)
+      setFileLoading(false)
     }
   }
 
-  const handlePdfUpload = async (event) => {
+  const handleFileUpload = async (event) => {
     const files = Array.from(event.target.files || [])
     if (!files.length) return
-    await appendPdfToNotes(files)
+    await appendFileToNotes(files)
     event.target.value = ''
   }
 
-  const handleDropPdf = async (e) => {
+  const handleDrop = async (e) => {
     e.preventDefault()
-    const files = Array.from(e.dataTransfer.files).filter((f) =>
-      f.name.toLowerCase().endsWith('.pdf')
-    )
+    const files = Array.from(e.dataTransfer.files).filter((f) => {
+      const lower = f.name.toLowerCase()
+      return lower.endsWith('.pdf') || lower.endsWith('.pptx') || lower.endsWith('.ppt')
+    })
     if (!files.length) return
-    await appendPdfToNotes(files)
+    await appendFileToNotes(files)
   }
 
   // ── Summarize ───────────────────────────────────────────────────────────────
@@ -210,7 +259,7 @@ Rules:
 - Consolidate repeated concepts into one place
 - Infer meaning from messy or unclear notes
 - Never say "the notes mention..." or "you wrote..." — present content as fact
-- If the notes contain text from uploaded PDFs (marked with "--- Uploaded: filename ---"), treat it as source material and integrate it naturally
+- If the notes contain text from uploaded files (marked with "--- Uploaded: filename ---"), treat it as source material and integrate it naturally. For PowerPoint slides marked [Slide N], treat each as a separate topic or section.
 
 Preferences:
 - Subject mode: ${preferences.subjectMode} — ${subjectInstructions[preferences.subjectMode]}
@@ -336,7 +385,10 @@ Output clean markdown only.`,
     const plainText = richSummaryRef.current.innerText
     try {
       if (window.ClipboardItem && navigator.clipboard?.write) {
-        await navigator.clipboard.write([new ClipboardItem({ 'text/html': new Blob([html], { type: 'text/html' }), 'text/plain': new Blob([plainText], { type: 'text/plain' }) })])
+        await navigator.clipboard.write([new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([plainText], { type: 'text/plain' }),
+        })])
       } else {
         const tempDiv = document.createElement('div')
         tempDiv.contentEditable = 'true'
@@ -404,7 +456,11 @@ Output clean markdown only.`,
     try {
       const parsed = []
       for (const file of files) {
-        const text = file.name.toLowerCase().endsWith('.pdf') ? await readPdfFile(file) : await readTextFile(file)
+        const lower = file.name.toLowerCase()
+        let text = ''
+        if (lower.endsWith('.pdf')) text = await readPdfFile(file)
+        else if (lower.endsWith('.pptx') || lower.endsWith('.ppt')) text = await readPptxFile(file)
+        else text = await readTextFile(file)
         if (text.trim()) parsed.push({ id: `${Date.now()}-${file.name}`, name: file.name, text: text.trim() })
       }
       if (parsed.length) setPreferences((prev) => ({ ...prev, styleExamples: [...prev.styleExamples, ...parsed].slice(0, 3) }))
@@ -466,32 +522,40 @@ Output clean markdown only.`,
 
       <section className="workspace-card">
 
-        {/* LEFT — notes + PDF upload */}
+        {/* LEFT — notes + file upload */}
         <div className="panel notes-panel">
           <label htmlFor="notes" className="section-label">Your Notes</label>
 
+          {/* Drop zone — accepts PDF and PPTX */}
           <div
             className="pdf-dropzone"
             onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDropPdf}
-            onClick={() => pdfInputRef.current?.click()}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
           >
-            {pdfLoading ? (
-              <span className="muted-copy">Reading PDF...</span>
+            {fileLoading ? (
+              <span className="muted-copy">Reading file...</span>
             ) : (
               <>
-                <span className="dropzone-icon">📄</span>
-                <span className="muted-copy">Drop PDF here or <u>click to upload</u></span>
+                <span className="dropzone-icon">📎</span>
+                <span className="muted-copy">Drop a <strong>PDF</strong> or <strong>PowerPoint</strong> here, or <u>click to upload</u></span>
               </>
             )}
           </div>
-          <input ref={pdfInputRef} type="file" accept=".pdf" multiple style={{ display: 'none' }} onChange={handlePdfUpload} />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".pdf,.pptx,.ppt"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleFileUpload}
+          />
 
           {uploadedFiles.length > 0 && (
             <div className="example-pills" style={{ marginBottom: 8 }}>
               {uploadedFiles.map((name, i) => (
                 <span key={i} className="example-pill">
-                  📄 {name}
+                  {name.toLowerCase().endsWith('.pdf') ? '📄' : '📊'} {name}
                   <button type="button" className="pill-remove" onClick={() => setUploadedFiles((prev) => prev.filter((_, j) => j !== i))}>✕</button>
                 </span>
               ))}
@@ -503,7 +567,7 @@ Output clean markdown only.`,
             className="notes-input"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Type or paste notes here, or drop a PDF above to append it..."
+            placeholder="Type or paste notes here, or drop a PDF / PowerPoint above..."
           />
           <div className="panel-actions">
             <button type="button" disabled={loading} onClick={handleSummarize} className="btn btn-summarize">Summarize</button>
@@ -595,7 +659,7 @@ Output clean markdown only.`,
               <button type="button" className="btn btn-subtle btn-small" onClick={() => examplesInputRef.current?.click()} disabled={preferences.styleExamples.length >= 3}>
                 Upload Example Summary
               </button>
-              <input ref={examplesInputRef} type="file" accept=".txt,.md,.pdf" multiple style={{ display: 'none' }} onChange={handleUploadExamples} />
+              <input ref={examplesInputRef} type="file" accept=".txt,.md,.pdf,.pptx,.ppt" multiple style={{ display: 'none' }} onChange={handleUploadExamples} />
               <div className="example-pills">
                 {preferences.styleExamples.map((ex) => (
                   <span key={ex.id} className="example-pill">
