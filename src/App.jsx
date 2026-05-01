@@ -31,6 +31,7 @@ const inlineMd = (text) =>
 const isTableRow = (line) => /^\|.+\|$/.test(line.trim())
 const isSeparatorRow = (line) => /^\|[-| :]+\|$/.test(line.trim())
 
+
 const markdownToHtml = (md) => {
   if (!md.trim()) return '<p></p>'
   const lines = md.split('\n')
@@ -51,13 +52,17 @@ const markdownToHtml = (md) => {
     const [headerRow, ...bodyRows] = parsed
     html += '<table style="width:100%;border-collapse:collapse;margin:12px 0">'
     html += '<thead><tr>'
-    headerRow.forEach((cell) => { html += `<th style="border:1px solid #d1d5db;padding:8px;text-align:left;background:#f9fafb">${inlineMd(cell)}</th>` })
+    headerRow.forEach((cell) => {
+      html += `<th style="border:1px solid #d1d5db;padding:8px;text-align:left;background:#f9fafb">${inlineMd(cell)}</th>`
+    })
     html += '</tr></thead>'
     if (bodyRows.length) {
       html += '<tbody>'
       bodyRows.forEach((row) => {
         html += '<tr>'
-        row.forEach((cell) => { html += `<td style="border:1px solid #d1d5db;padding:8px">${inlineMd(cell)}</td>` })
+        row.forEach((cell) => {
+          html += `<td style="border:1px solid #d1d5db;padding:8px">${inlineMd(cell)}</td>`
+        })
         html += '</tr>'
       })
       html += '</tbody>'
