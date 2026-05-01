@@ -645,3 +645,57 @@
 .note-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .icon-btn { background: none; border: none; cursor: pointer; font-size: 13px; padding: 4px; opacity: 0.4; transition: opacity 0.15s; }
 .icon-btn:hover { opacity: 1; }
+
+/* ── Tiptap editor ── */
+.tiptap-editor {
+  outline: none;
+  min-height: 200px;
+  line-height: 1.8;
+  font-size: 15px;
+  color: #0f172a;
+  font-family: 'DM Sans', sans-serif;
+}
+.tiptap-editor h1, .tiptap-editor h2, .tiptap-editor h3 {
+  font-family: 'Instrument Serif', serif;
+  font-weight: 400;
+  margin: 1em 0 0.4em;
+  color: #0f172a;
+}
+.tiptap-editor h2 { font-size: 1.4em; }
+.tiptap-editor h3 { font-size: 1.15em; }
+.tiptap-editor p { margin: 0 0 0.6em; }
+.tiptap-editor ul, .tiptap-editor ol { padding-left: 1.4rem; margin: 0 0 0.6em; }
+.tiptap-editor li { margin-bottom: 3px; }
+.tiptap-editor strong { font-weight: 700; }
+.tiptap-editor code { background: #f1f5f9; padding: 2px 5px; border-radius: 4px; font-size: 13px; }
+.tiptap-editor p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+  float: left;
+  height: 0;
+}
+
+/* ── Formatting toolbar ── */
+.editor-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0 10px;
+  flex-wrap: wrap;
+}
+.toolbar-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  color: #475569;
+  transition: all 0.15s;
+  min-width: 32px;
+}
+.toolbar-btn:hover { background: #f4f1ec; color: #0f172a; }
+.toolbar-btn.is-active { background: #0f172a; color: white; border-color: #0f172a; }
+.toolbar-divider { width: 1px; height: 18px; background: #e8e4de; margin: 0 4px; }
