@@ -493,10 +493,6 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
     currentNoteIdRef.current = note.id; setSidebarOpen(false); setUploadedFiles([])
     const summary = note.summary || ''
     setViewMarkdown(summary); setStreamBuffer(summary)
-    if (editor) {
-      const html = summary.trim().startsWith('<') ? summary : markdownToHtml(summary)
-      editor.commands.setContent(html, false)
-    }
   }
 
   const handleDeleteSavedNote = (id) => {
@@ -751,7 +747,7 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
           )}
 
           {/* Content */}
-          <div className={`summary-surface ${hasSummary ? 'has-content' : ''}`}>
+          <div className={`summary-surface ${hasSummary ? 'has-content' : ''} ${editMode ? 'is-editing' : ''}`}>
             {loading ? (
               <div className="shimmer-wrap">
                 <div className="shimmer-line" /><div className="shimmer-line short" />
