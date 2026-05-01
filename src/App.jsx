@@ -206,8 +206,8 @@ function App() {
   useEffect(() => {
     if (!streaming && streamBuffer) {
       setViewMarkdown(streamBuffer)
-      if (editor) editor.commands.setContent(markdownToHtml(streamBuffer), false)
       setIsDirty(true)
+      // Don't load into Tiptap here — only load when user enters edit mode
     }
   }, [streaming])
 
