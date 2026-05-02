@@ -586,3 +586,13 @@
   /* Modal */
   .modal-backdrop { background: rgba(0,0,0,0.6); }
 }
+/* Interim transcript preview */
+.interim-transcript {
+  font-size: 14px;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 6px 0 2px;
+  min-height: 24px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}

@@ -125,6 +125,17 @@ const getRemainingUsage = () => {
   return Math.max(0, DAILY_LIMIT - usage.count)
 }
 
+// ── Language map for Deepgram ─────────────────────────────────────────────────
+const languageToDeepgramCode = {
+  English: 'en',
+  Spanish: 'es',
+  French: 'fr',
+  German: 'de',
+  Dutch: 'nl',
+  Italian: 'it',
+  Portuguese: 'pt',
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 function App() {
   const storageKey = 'saved-study-notes'
@@ -158,14 +169,18 @@ function App() {
   const [editMode, setEditMode] = useState(false)
   const [linkUrl, setLinkUrl] = useState('')
   const [showLinkInput, setShowLinkInput] = useState(false)
+  const [interimTranscript, setInterimTranscript] = useState('')
 
-  const recognitionRef = useRef(null)
+  const deepgramSocketRef = useRef(null)
+  const mediaStreamRef = useRef(null)
+  const mediaRecorderRef = useRef(null)
   const richSummaryRef = useRef(null)
   const examplesInputRef = useRef(null)
   const fileInputRef = useRef(null)
   const currentNoteIdRef = useRef(null)
   const autoSaveTimerRef = useRef(null)
   const linkInputRef = useRef(null)
+  const finalTranscriptRef = useRef('')
 
   const [preferences, setPreferences] = useState(() => {
     try { const raw = localStorage.getItem(preferencesKey); return raw ? { ...defaultPreferences, ...JSON.parse(raw) } : defaultPreferences }
@@ -207,7 +222,6 @@ function App() {
     if (!streaming && streamBuffer) {
       setViewMarkdown(streamBuffer)
       setIsDirty(true)
-      // Don't load into Tiptap here — only load when user enters edit mode
     }
   }, [streaming])
 
@@ -224,8 +238,7 @@ function App() {
     if (!linkUrl.trim()) { editor.chain().focus().unsetLink().run(); setShowLinkInput(false); return }
     const url = linkUrl.startsWith('http') ? linkUrl : `https://${linkUrl}`
     editor.chain().focus().setLink({ href: url }).run()
-    setShowLinkInput(false)
-    setLinkUrl('')
+    setShowLinkInput(false); setLinkUrl('')
   }
 
   const handleLinkBtn = () => {
@@ -340,9 +353,7 @@ function App() {
         if (text.trim()) {
           setNotes((p) => p.trim() ? `${p}\n\n--- Uploaded: ${file.name} ---\n\n${text.trim()}` : `--- Uploaded: ${file.name} ---\n\n${text.trim()}`)
           setUploadedFiles((p) => [...p, file.name])
-        } else {
-          alert(`No readable text found in ${file.name}.`)
-        }
+        } else { alert(`No readable text found in ${file.name}.`) }
       }
     } catch (err) { alert(`Could not read file: ${err.message}`) }
     finally { setFileLoading(false) }
@@ -362,6 +373,108 @@ function App() {
     })
     if (files.length) await appendFileToNotes(files)
   }
+
+  // ── Deepgram live dictation ───────────────────────────────────────────────────
+  const stopRecording = () => {
+    // Stop media recorder
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    // Stop all mic tracks
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((t) => t.stop())
+      mediaStreamRef.current = null
+    }
+    // Close WebSocket
+    if (deepgramSocketRef.current) {
+      deepgramSocketRef.current.close()
+      deepgramSocketRef.current = null
+    }
+    // Commit any remaining interim transcript
+    if (finalTranscriptRef.current.trim()) {
+      setNotes((p) => p.trim() ? `${p} ${finalTranscriptRef.current.trim()}` : finalTranscriptRef.current.trim())
+    }
+    finalTranscriptRef.current = ''
+    setInterimTranscript('')
+    setIsRecording(false)
+  }
+
+  const handleToggleRecording = async () => {
+    if (isRecording) { stopRecording(); return }
+
+    try {
+      // Get Deepgram key from our serverless function
+      const tokenRes = await fetch('/api/deepgram-token', { method: 'POST' })
+      const { key } = await tokenRes.json()
+      if (!key) throw new Error('Could not get Deepgram key')
+
+      // Get microphone access
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      mediaStreamRef.current = stream
+
+      // Map user's language preference to Deepgram language code
+      const dgLang = languageToDeepgramCode[preferences.language] || 'en'
+
+      // Open Deepgram WebSocket
+      const socket = new WebSocket(
+        `wss://api.deepgram.com/v1/listen?language=${dgLang}&model=nova-2&smart_format=true&interim_results=true&punctuate=true&utterance_end_ms=1000&filler_words=false`,
+        ['token', key]
+      )
+      deepgramSocketRef.current = socket
+
+      socket.onopen = () => {
+        // Start sending audio
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+        mediaRecorderRef.current = mediaRecorder
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (socket.readyState === WebSocket.OPEN && e.data.size > 0) {
+            socket.send(e.data)
+          }
+        }
+
+        mediaRecorder.start(250) // send chunks every 250ms
+        setIsRecording(true)
+      }
+
+      socket.onmessage = (event) => {
+        const data = JSON.parse(event.data)
+        const transcript = data?.channel?.alternatives?.[0]?.transcript
+        const isFinal = data?.is_final
+
+        if (!transcript) return
+
+        if (isFinal) {
+          // Final result — append to notes permanently
+          finalTranscriptRef.current = ''
+          setInterimTranscript('')
+          setNotes((p) => {
+            const separator = p.trim() ? ' ' : ''
+            return p + separator + transcript
+          })
+        } else {
+          // Interim result — show as preview
+          setInterimTranscript(transcript)
+        }
+      }
+
+      socket.onerror = () => {
+        alert('Deepgram connection error. Please try again.')
+        stopRecording()
+      }
+
+      socket.onclose = () => {
+        if (isRecording) stopRecording()
+      }
+
+    } catch (err) {
+      alert(`Could not start recording: ${err.message}`)
+      stopRecording()
+    }
+  }
+
+  // Cleanup on unmount
+  useEffect(() => { return () => stopRecording() }, [])
 
   // ── Summarize ─────────────────────────────────────────────────────────────────
   const handleSummarize = async () => {
@@ -544,22 +657,6 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
     w.document.close(); w.focus(); w.print()
   }
 
-  // ── Voice ─────────────────────────────────────────────────────────────────────
-  const handleToggleRecording = () => {
-    if (isRecording) { recognitionRef.current?.stop(); setIsRecording(false); return }
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
-    if (!SR) { alert('Please use Chrome for voice input'); return }
-    const rec = new SR(); rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US'
-    rec.onresult = (e) => {
-      let chunk = ''
-      for (let i = e.resultIndex; i < e.results.length; i++) chunk += e.results[i][0].transcript
-      if (chunk.trim()) setNotes((p) => `${p}${p ? ' ' : ''}${chunk.trim()}`)
-    }
-    rec.onend = () => { setIsRecording(false); recognitionRef.current = null }
-    rec.onerror = () => { setIsRecording(false); recognitionRef.current = null }
-    recognitionRef.current = rec; rec.start(); setIsRecording(true)
-  }
-
   // ── Style examples ────────────────────────────────────────────────────────────
   const readTextFile = (file) => new Promise((res, rej) => {
     const r = new FileReader()
@@ -584,7 +681,6 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
     finally { event.target.value = '' }
   }
 
-  useEffect(() => { return () => recognitionRef.current?.stop() }, [])
   useEffect(() => { localStorage.setItem(preferencesKey, JSON.stringify(preferences)) }, [preferences])
 
   // ── Render ────────────────────────────────────────────────────────────────────
@@ -651,8 +747,16 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
               ))}
             </div>
           )}
-          <textarea id="notes" className="notes-input" value={notes} onChange={(e) => setNotes(e.target.value)}
-            placeholder={"Type or paste notes here, or upload a file above.\n\nCmd+Enter to summarize."} />
+
+          {/* Notes textarea — shows interim transcript below */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <textarea id="notes" className="notes-input" value={notes} onChange={(e) => setNotes(e.target.value)}
+              placeholder={"Type or paste notes here, or upload a file above.\n\nCmd+Enter to summarize."} />
+            {interimTranscript && (
+              <div className="interim-transcript">{interimTranscript}</div>
+            )}
+          </div>
+
           <div className="panel-actions">
             <button type="button" disabled={loading || usageRemaining <= 0} onClick={handleSummarize} className="btn btn-summarize">
               Summarize
@@ -662,9 +766,7 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
             </button>
             {isRecording && <span className="recording-indicator">Recording</span>}
             {usageRemaining < DAILY_LIMIT && (
-              <span className="usage-counter">
-                {usageRemaining}/{DAILY_LIMIT} left today
-              </span>
+              <span className="usage-counter">{usageRemaining}/{DAILY_LIMIT} left today</span>
             )}
           </div>
         </div>
@@ -695,29 +797,21 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
           {editMode && hasSummary && editor && (
             <div className="editor-toolbar-wrap">
               <div className="editor-toolbar">
-                <ToolbarBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} title="Bold (Cmd+B)"><strong>B</strong></ToolbarBtn>
-                <ToolbarBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} title="Italic (Cmd+I)"><em>I</em></ToolbarBtn>
-                <ToolbarBtn onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} title="Underline (Cmd+U)"><u>U</u></ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().toggleBold().run()} active={editor.isActive('bold')} title="Bold"><strong>B</strong></ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().toggleItalic().run()} active={editor.isActive('italic')} title="Italic"><em>I</em></ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().toggleUnderline().run()} active={editor.isActive('underline')} title="Underline"><u>U</u></ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleStrike().run()} active={editor.isActive('strike')} title="Strikethrough"><s>S</s></ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleSubscript().run()} active={editor.isActive('subscript')} title="Subscript">x₂</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleSuperscript().run()} active={editor.isActive('superscript')} title="Superscript">x²</ToolbarBtn>
                 <ToolbarSep />
-                <ToolbarBtn onClick={() => editor.chain().focus().toggleHighlight({ color: '#fef08a' }).run()} active={editor.isActive('highlight', { color: '#fef08a' })} title="Highlight yellow">
-                  <span style={{ background: '#fef08a', padding: '0 3px', borderRadius: 2 }}>H</span>
-                </ToolbarBtn>
-                <ToolbarBtn onClick={() => editor.chain().focus().toggleHighlight({ color: '#bbf7d0' }).run()} active={editor.isActive('highlight', { color: '#bbf7d0' })} title="Highlight green">
-                  <span style={{ background: '#bbf7d0', padding: '0 3px', borderRadius: 2 }}>H</span>
-                </ToolbarBtn>
-                <ToolbarBtn onClick={() => editor.chain().focus().toggleHighlight({ color: '#bfdbfe' }).run()} active={editor.isActive('highlight', { color: '#bfdbfe' })} title="Highlight blue">
-                  <span style={{ background: '#bfdbfe', padding: '0 3px', borderRadius: 2 }}>H</span>
-                </ToolbarBtn>
-                <ToolbarBtn onClick={() => editor.chain().focus().unsetHighlight().run()} active={false} title="Remove highlight">
-                  <span style={{ textDecoration: 'line-through', fontSize: 11 }}>H</span>
-                </ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().toggleHighlight({ color: '#fef08a' }).run()} active={editor.isActive('highlight', { color: '#fef08a' })} title="Highlight yellow"><span style={{ background: '#fef08a', padding: '0 3px', borderRadius: 2 }}>H</span></ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().toggleHighlight({ color: '#bbf7d0' }).run()} active={editor.isActive('highlight', { color: '#bbf7d0' })} title="Highlight green"><span style={{ background: '#bbf7d0', padding: '0 3px', borderRadius: 2 }}>H</span></ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().toggleHighlight({ color: '#bfdbfe' }).run()} active={editor.isActive('highlight', { color: '#bfdbfe' })} title="Highlight blue"><span style={{ background: '#bfdbfe', padding: '0 3px', borderRadius: 2 }}>H</span></ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().unsetHighlight().run()} active={false} title="Remove highlight"><span style={{ textDecoration: 'line-through', fontSize: 11 }}>H</span></ToolbarBtn>
                 <ToolbarSep />
-                <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive('heading', { level: 1 })} title="Heading 1">H1</ToolbarBtn>
-                <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} title="Heading 2">H2</ToolbarBtn>
-                <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} active={editor.isActive('heading', { level: 3 })} title="Heading 3">H3</ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()} active={editor.isActive('heading', { level: 1 })} title="H1">H1</ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()} active={editor.isActive('heading', { level: 2 })} title="H2">H2</ToolbarBtn>
+                <ToolbarBtn onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()} active={editor.isActive('heading', { level: 3 })} title="H3">H3</ToolbarBtn>
                 <ToolbarSep />
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleBulletList().run()} active={editor.isActive('bulletList')} title="Bullet list">• List</ToolbarBtn>
                 <ToolbarBtn onClick={() => editor.chain().focus().toggleOrderedList().run()} active={editor.isActive('orderedList')} title="Numbered list">1. List</ToolbarBtn>
@@ -748,14 +842,14 @@ Output clean markdown only. Use ## for section headings, **bold** for key terms,
 
           {/* Content */}
           <div className={`summary-surface ${hasSummary ? 'has-content' : ''} ${editMode ? 'is-editing' : ''}`}>
-          {loading && !streamBuffer ? (
-            <div className="shimmer-wrap">
-              <div className="shimmer-line" /><div className="shimmer-line short" />
-              <div className="shimmer-line" /><div className="shimmer-line medium" /><div className="shimmer-line" />
-            </div>
-          ) : (loading || streaming) && streamBuffer ? (
-            <ReactMarkdown className="markdown-content streaming" remarkPlugins={[remarkGfm]}>{streamBuffer}</ReactMarkdown>
-          ) : hasSummary ? (
+            {loading && !streamBuffer ? (
+              <div className="shimmer-wrap">
+                <div className="shimmer-line" /><div className="shimmer-line short" />
+                <div className="shimmer-line" /><div className="shimmer-line medium" /><div className="shimmer-line" />
+              </div>
+            ) : (loading || streaming) && streamBuffer ? (
+              <ReactMarkdown className="markdown-content streaming" remarkPlugins={[remarkGfm]}>{streamBuffer}</ReactMarkdown>
+            ) : hasSummary ? (
               editMode ? (
                 <EditorContent editor={editor} />
               ) : (
