@@ -535,7 +535,8 @@ Preferences:
 - Note type: ${preferences.noteType} — ${noteTypeInstructions[preferences.noteType] || ''}
 - Subject: ${preferences.subjectMode || 'not specified'}
 - Length: ${preferences.summaryLength} — ${lengthInstructions[preferences.summaryLength]}
-- Language: ${preferences.language}
+- Language: ${preferences.language} — this is critical. Every single word in your response must be in ${preferences.language}. Do not use any English words unless they are proper nouns or technical terms with no translation. Section headings, labels, bullets, warnings — everything must be in ${preferences.language}.
+
 ${styleExamplesSection}
 Output clean markdown only. Use ## for section headings, **bold** for key terms, - for bullets, and | table | syntax for comparisons.`,
           messages: [{ role: 'user', content: notes }],

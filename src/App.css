@@ -596,3 +596,15 @@
   border-top: 1px solid var(--border);
   margin-top: 4px;
 }
+.summary-title-row {
+  flex-shrink: 0;
+}
+
+.note-title-input {
+  min-width: 0;
+  width: 100%;
+}
+
+.summary-panel {
+  overflow: hidden;
+}
