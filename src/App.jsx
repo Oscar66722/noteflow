@@ -193,7 +193,7 @@ function App() {
   })
 
   const wordCount = notes.trim() ? notes.trim().split(/\s+/).length : 0
-  const isLong = wordCount > 800
+  const isLong = wordCount > 1200
   const hasSummary = viewMarkdown.trim().length > 0
   const isHtmlContent = viewMarkdown.trim().startsWith('<')
   const autoTitle = (text) => text.trim().split(/\s+/).slice(0, 6).join(' ') || 'Untitled Note'
